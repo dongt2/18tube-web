@@ -21,6 +21,8 @@ from flask import Flask, render_template, jsonify, request, send_file, abort, Re
 # Import core helpers from downloader
 import downloader
 
+SUBPROCESS_EXTRA = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+
 app = Flask(
     __name__,
     template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "templates"),
@@ -61,13 +63,12 @@ def clear_cache():
         _cache.clear()
 
 def run_rclone(args, timeout=60):
-    """Chạy rclone với NO_WINDOW flag."""
+    """Chạy rclone tương thích đa nền tảng (Windows & Linux)."""
     rc = downloader.get_rclone_path()
     import shutil
     if not rc or (os.path.isabs(rc) and not os.path.isfile(rc)) or (not os.path.isabs(rc) and not shutil.which(rc)):
         raise FileNotFoundError("Không tìm thấy công cụ rclone trên hệ thống")
     
-    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     cmd = [rc] + args
     res = subprocess.run(
         cmd,
@@ -76,7 +77,7 @@ def run_rclone(args, timeout=60):
         encoding="utf-8",
         errors="replace",
         timeout=timeout,
-        creationflags=creationflags
+        **SUBPROCESS_EXTRA
     )
     if res.returncode != 0:
         raise RuntimeError(f"Rclone error (code {res.returncode}): {res.stderr.strip()}")
@@ -553,8 +554,7 @@ def get_drive_access_token(remote="gg"):
     if not rc:
         return None
     try:
-        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        res = subprocess.run([rc, "config", "show", remote], capture_output=True, text=True, timeout=5, creationflags=creationflags)
+        res = subprocess.run([rc, "config", "show", remote], capture_output=True, text=True, timeout=5, **SUBPROCESS_EXTRA)
         token_m = re.search(r'token\s*=\s*(\{.*?\})', res.stdout)
         if token_m:
             token_data = json.loads(token_m.group(1))
@@ -591,8 +591,7 @@ def api_media_drive_stream():
         # Nếu token hết hạn (401), làm mới token bằng rclone
         if resp.status_code == 401:
             rc = downloader.get_rclone_path()
-            creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            subprocess.run([rc, "about", "gg:", "--json"], capture_output=True, text=True, timeout=8, creationflags=creationflags)
+            subprocess.run([rc, "about", "gg:", "--json"], capture_output=True, text=True, timeout=8, **SUBPROCESS_EXTRA)
             token = get_drive_access_token("gg")
             if token:
                 headers["Authorization"] = f"Bearer {token}"
@@ -693,10 +692,9 @@ def api_media_thumbnail():
 
             # Tạo thumbnail bằng FFmpeg
             ff = downloader.get_ffmpeg_path() or "ffmpeg"
-            creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             cmd = [ff, "-ss", "00:00:01", "-i", file_path, "-vframes", "1", "-q:v", "3", "-y", cache_file]
             try:
-                subprocess.run(cmd, capture_output=True, creationflags=creationflags, timeout=10)
+                subprocess.run(cmd, capture_output=True, timeout=10, **SUBPROCESS_EXTRA)
             except Exception:
                 pass
 
@@ -704,7 +702,7 @@ def api_media_thumbnail():
                 # Thử lại tại 0s nếu video ngắn hơn 1 giây
                 cmd0 = [ff, "-ss", "00:00:00", "-i", file_path, "-vframes", "1", "-q:v", "3", "-y", cache_file]
                 try:
-                    subprocess.run(cmd0, capture_output=True, creationflags=creationflags, timeout=10)
+                    subprocess.run(cmd0, capture_output=True, timeout=10, **SUBPROCESS_EXTRA)
                 except Exception:
                     pass
 
@@ -896,11 +894,11 @@ def api_system_open_folder():
     try:
         data = request.get_json() or {}
         folder_path = data.get("path", "")
-        if not folder_path or not os.path.exists(folder_path):
-            return jsonify({"success": False, "error": "Thư mục không tồn tại"}), 404
-        
-        os.startfile(os.path.abspath(folder_path))
-        return jsonify({"success": True, "message": f"Đã mở thư mục: {folder_path}"})
+        if hasattr(os, 'startfile'):
+            os.startfile(os.path.abspath(folder_path))
+            return jsonify({"success": True, "message": f"Đã mở thư mục: {folder_path}"})
+        else:
+            return jsonify({"success": False, "error": "Chức năng chỉ hỗ trợ khi chạy trên máy tính cá nhân"}), 400
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

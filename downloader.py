@@ -31,6 +31,7 @@ if sys.platform == "win32":
         pass
 
 # Cờ ẩn hoàn toàn cửa sổ console/CMD cho các tiến trình con trên Windows
+SUBPROCESS_EXTRA = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 HEADERS = {
@@ -466,7 +467,7 @@ def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=
             stderr=subprocess.DEVNULL,
             text=True,
             bufsize=1,
-            creationflags=NO_WINDOW
+            **SUBPROCESS_EXTRA
         )
 
         curr_bytes = 0
@@ -566,7 +567,7 @@ def check_rclone_available():
     """Kiểm tra xem rclone đã sẵn sàng hoạt động hay chưa."""
     rc = get_rclone_path()
     try:
-        res = subprocess.run([rc, "version"], capture_output=True, text=True, timeout=5, creationflags=NO_WINDOW)
+        res = subprocess.run([rc, "version"], capture_output=True, text=True, timeout=5, **SUBPROCESS_EXTRA)
         return res.returncode == 0
     except Exception:
         return False
@@ -599,7 +600,7 @@ def get_drive_info(remote="gg"):
     rc = get_rclone_path()
 
     try:
-        res = subprocess.run([rc, "config", "show", remote], capture_output=True, text=True, timeout=5, creationflags=NO_WINDOW)
+        res = subprocess.run([rc, "config", "show", remote], capture_output=True, text=True, timeout=5, **SUBPROCESS_EXTRA)
         config_text = res.stdout
     except Exception as e:
         info["message"] = f"Lỗi đọc cấu hình: {e}"
@@ -747,7 +748,7 @@ def upload_to_google_drive(local_dir, remote_name="gg", drive_folder="18TUBE", p
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            creationflags=NO_WINDOW
+            **SUBPROCESS_EXTRA
         )
 
         curr_pct = 0

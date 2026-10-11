@@ -7,13 +7,15 @@ mkdir -p ~/.config/rclone
 # Tự động nạp cấu hình rclone từ Biến môi trường trên Cloud
 if [ -n "$RCLONE_CONFIG_BASE64" ]; then
     echo "[*] Nạp cấu hình Rclone từ biến RCLONE_CONFIG_BASE64..."
-    echo "$RCLONE_CONFIG_BASE64" | base64 -d > ~/.config/rclone/rclone.conf
+    echo "$RCLONE_CONFIG_BASE64" | tr -d '\r\n ' | base64 -d > ~/.config/rclone/rclone.conf
 elif [ -n "$RCLONE_CONFIG" ]; then
     echo "[*] Nạp cấu hình Rclone từ biến RCLONE_CONFIG..."
     echo "$RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
 fi
 
-if [ -f ~/.config/rclone/rclone.conf ]; then
+export RCLONE_CONFIG="$HOME/.config/rclone/rclone.conf"
+
+if [ -f "$RCLONE_CONFIG" ]; then
     echo "[OK] Cấu hình Rclone đã sẵn sàng."
 else
     echo "[!] Cảnh báo: Chưa tìm thấy file rclone.conf. Vui lòng thêm biến môi trường RCLONE_CONFIG_BASE64 trên Cloud."

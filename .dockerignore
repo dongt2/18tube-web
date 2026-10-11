@@ -1,0 +1,11 @@
+.git
+.thumbnails
+bin/*.exe
+build
+dist
+__pycache__
+*.pyc
+*.spec
+downloads
+scratch
+tunnel_url.txt

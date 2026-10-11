@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+
+# Build & Binaries (Khắc phục lỗi file > 100MB trên GitHub)
+build/
+dist/
+bin/
+*.exe
+*.pkg
+
+# Cache & Local Data
+.thumbnails/
+downloads/
+scratch/
+tunnel_url.txt
+*.log
+
+# IDE & Config
+.vscode/
+.idea/

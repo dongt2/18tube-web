@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>18TUBE Cinema & Gallery - Trình Xem Video & Ảnh</title>
+    <meta name="description" content="Trình xem media chuyên dụng: Xem ảnh độ phân giải cao và phát video mượt mà chuẩn rạp chiếu phim.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Video.js CSS -->
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/gallery.css">
+</head>
+<body class="cinema-theme">
+    <div id="gallery-app" class="cinema-layout">
+        <!-- TOP NAVIGATION BAR -->
+        <header class="cinema-header">
+            <div class="header-left">
+                <a href="/gallery" class="cinema-brand">
+                    <div class="brand-logo-glow">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                    </div>
+                    <div class="brand-titles">
+                        <span class="brand-main">18TUBE <span class="gradient-cinema">CINEMA & GALLERY</span></span>
+                        <span class="brand-sub">Trình Xem Ảnh & Video Chuyên Nghiệp</span>
+                    </div>
+                </a>
+            </div>
+
+            <!-- SOURCE & CREATOR SELECTOR -->
+            <div class="header-center">
+                <div class="source-picker-box">
+                    <div class="drive-source-badge">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path></svg>
+                        <span>Google Drive</span>
+                    </div>
+
+                    <div class="creator-dropdown-wrap">
+                        <label for="creator-select">Creator:</label>
+                        <select id="creator-select" class="creator-select-box">
+                            <option value="">Đang tải danh sách...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SEARCH & ACTIONS -->
+            <div class="header-right">
+                <div class="quick-search">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="gallery-search" placeholder="Tìm tên ảnh hoặc video...">
+                </div>
+
+                <a href="/" class="btn-dashboard-link" title="Mở trang kiểm tra & đối soát source">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="9" rx="1"></rect>
+                        <rect x="14" y="3" width="7" height="5" rx="1"></rect>
+                        <rect x="14" y="12" width="7" height="9" rx="1"></rect>
+                    </svg>
+                    <span>Trang Inspector</span>
+                </a>
+            </div>
+        </header>
+
+        <!-- SUB HEADER: FILTER TABS & STATS BAR -->
+        <div class="gallery-subbar">
+            <div class="subbar-content">
+                <div class="media-type-filters">
+                    <button class="filter-tab active" data-type="all">
+                        <span>✨ Tất cả</span>
+                        <span class="count-badge" id="badge-cnt-all">0</span>
+                    </button>
+                    <button class="filter-tab" data-type="video">
+                        <span>🎬 Video</span>
+                        <span class="count-badge" id="badge-cnt-video">0</span>
+                    </button>
+                    <button class="filter-tab" data-type="photo">
+                        <span>📸 Ảnh</span>
+                        <span class="count-badge" id="badge-cnt-photo">0</span>
+                    </button>
+                </div>
+
+                <!-- CREATOR CHIPS LIST -->
+                <div class="creator-ribbon" id="creator-ribbon">
+                    <!-- Populated dynamically -->
+                </div>
+
+                <!-- VIEW SETTINGS -->
+                <div class="view-controls">
+                    <span class="media-counter-text" id="media-status-text">Đang tải...</span>
+                    <div class="density-toggles">
+                        <button class="density-btn active" data-cols="compact" title="Hiển thị dày đặc">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                        </button>
+                        <button class="density-btn" data-cols="large" title="Hình ảnh lớn">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN MEDIA GALLERY CONTAINER -->
+        <main class="gallery-main">
+            <!-- MEDIA GRID -->
+            <div class="cinema-grid" id="cinema-grid">
+                <div class="cinema-loading">
+                    <div class="cinema-spinner"></div>
+                    <span>Đang nạp kho ảnh và video...</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- THEATER VIDEO PLAYER MODAL -->
+    <div class="theater-modal" id="theater-modal">
+        <div class="theater-backdrop" id="theater-backdrop"></div>
+        <div class="theater-window">
+            <div class="theater-header">
+                <div class="theater-title-info">
+                    <span class="theater-badge" id="theater-engine-badge">🎬 VIDEO.JS</span>
+                    <h3 id="theater-video-title">Tên Video</h3>
+                </div>
+                <div class="theater-controls-top">
+                    <!-- PLAYER ENGINE TOGGLES -->
+                    <div class="theater-engine-group" id="theater-engine-group">
+                        <button class="theater-engine-btn active" id="btn-engine-html5" title="Phát trực tiếp qua trình phát Video.js">⚡ Video.js Player</button>
+                        <button class="theater-engine-btn" id="btn-engine-drive" title="Xem qua Trình phát Google Drive">☁️ Drive Embed</button>
+                    </div>
+                    <button class="theater-btn-tool" id="btn-theater-loop" title="Lặp lại video">🔁 Lặp</button>
+                    <button class="theater-btn-tool" id="btn-theater-pip" title="Thu nhỏ hình trong hình (Picture-in-Picture)">⧉ PiP</button>
+                    <a id="btn-theater-external" href="#" target="_blank" class="theater-btn-tool" title="Mở trên tab Google Drive mới">↗ Drive Web</a>
+                    <a id="btn-theater-download" href="#" download class="theater-btn-tool" title="Tải video về máy">⬇ Tải về</a>
+                    <button class="theater-close-btn" id="btn-theater-close" title="Đóng rạp chiếu">&times;</button>
+                </div>
+            </div>
+
+            <div class="theater-body">
+                <!-- VIDEO DISPLAY AREA -->
+                <div class="theater-screen-area">
+                    <video id="theater-video" class="video-js vjs-default-skin vjs-big-play-centered" controls autoplay playsinline preload="auto">
+                        <p class="vjs-no-js">Trình duyệt không hỗ trợ thẻ video.</p>
+                    </video>
+                    <iframe id="theater-drive-iframe" allow="autoplay; fullscreen" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
+                </div>
+
+                <!-- PLAYLIST SIDEBAR (TIẾP THEO) -->
+                <aside class="theater-playlist-sidebar">
+                    <div class="playlist-header">
+                        <h4>Danh Sách Video (<span id="playlist-count">0</span>)</h4>
+                        <label class="auto-next-label">
+                            <input type="checkbox" id="chk-auto-next" checked>
+                            <span>Tự chuyển tập</span>
+                        </label>
+                    </div>
+                    <ul class="playlist-items-list" id="theater-playlist-items">
+                        <!-- Populated with video items -->
+                    </ul>
+                </aside>
+            </div>
+
+            <!-- FOOTER SPEED & KEYBOARD HINTS -->
+            <div class="theater-footer">
+                <div class="theater-keyboard-hints">
+                    <span>Phím tắt:</span>
+                    <kbd>Space</kbd> Tạm dừng
+                    <kbd>←</kbd> <kbd>→</kbd> Tua 5s
+                    <kbd>F</kbd> Toàn màn hình
+                    <kbd>M</kbd> Tắt tiếng
+                    <kbd>N</kbd> Video kế tiếp
+                </div>
+
+                <div class="theater-speed-group">
+                    <span>Tốc độ phát:</span>
+                    <button class="t-speed-btn" data-speed="0.5">0.5x</button>
+                    <button class="t-speed-btn" data-speed="0.75">0.75x</button>
+                    <button class="t-speed-btn active" data-speed="1">1.0x</button>
+                    <button class="t-speed-btn" data-speed="1.25">1.25x</button>
+                    <button class="t-speed-btn" data-speed="1.5">1.5x</button>
+                    <button class="t-speed-btn" data-speed="2">2.0x</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FULLSCREEN PHOTO LIGHTBOX SLIDESHOW -->
+    <div class="photo-lightbox" id="photo-lightbox">
+        <div class="lightbox-overlay" id="lightbox-overlay"></div>
+        <button class="lb-nav-btn lb-prev" id="lb-btn-prev" title="Ảnh trước (Mũi tên trái)">&#10094;</button>
+        <button class="lb-nav-btn lb-next" id="lb-btn-next" title="Ảnh tiếp (Mũi tên phải)">&#10095;</button>
+
+        <div class="lightbox-content-box">
+            <div class="lightbox-top-bar">
+                <div class="lb-meta">
+                    <span class="lb-counter" id="lb-counter">1 / 100</span>
+                    <span class="lb-title" id="lb-title">Tên ảnh</span>
+                </div>
+                <div class="lb-actions">
+                    <button class="lb-tool-btn" id="lb-btn-slideshow" title="Tự động trình chiếu">▶ Trình chiếu</button>
+                    <button class="lb-tool-btn" id="lb-btn-zoom-in" title="Phóng to">🔍+</button>
+                    <button class="lb-tool-btn" id="lb-btn-zoom-reset" title="Kích thước chuẩn">1:1</button>
+                    <button class="lb-tool-btn" id="lb-btn-rotate" title="Xoay ảnh">↻</button>
+                    <a id="lb-btn-download" href="#" download class="lb-tool-btn" title="Tải ảnh gốc">⬇</a>
+                    <button class="lb-tool-btn lb-close" id="lb-btn-close" title="Đóng (ESC)">&times;</button>
+                </div>
+            </div>
+
+            <div class="lightbox-image-stage" id="lb-stage">
+                <img id="lb-current-image" src="" alt="Xem ảnh">
+            </div>
+
+            <!-- THUMBNAIL STRIP AT BOTTOM -->
+            <div class="lightbox-filmstrip" id="lb-filmstrip">
+                <!-- Mini thumbnails -->
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="cinema-toast-container" class="cinema-toast-container"></div>
+
+    <!-- Video.js Script -->
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script src="/static/gallery.js"></script>
+</body>
+</html>

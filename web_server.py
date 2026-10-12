@@ -676,17 +676,30 @@ def api_drive_creator_detail(slug):
             all_videos = []
             country_filter = request.args.get("country", "").strip()
 
-            with _cache_lock:
-                for k, v in _cache.items():
-                    if k.startswith("drive_creator_items_") and k != "drive_creator_items_all":
-                        c_data = v.get("data", {})
-                        if isinstance(c_data, dict):
-                            c_country = c_data.get("country", "Việt Nam")
-                            if country_filter and country_filter.lower() not in ["all", "__all__"]:
-                                if c_country.lower() != country_filter.lower():
-                                    continue
-                            all_photos.extend(c_data.get("photos", []))
-                            all_videos.extend(c_data.get("videos", []))
+            try:
+                conn = _get_db()
+                with _db_lock:
+                    cur = conn.cursor()
+                    cur.execute("SELECT key, value FROM cache WHERE key LIKE 'drive_creator_items_%' AND key != 'drive_creator_items_all'")
+                    rows = cur.fetchall()
+                seen_all_slugs = set()
+                for k, val_bytes in rows:
+                    c_item = json.loads(zlib.decompress(val_bytes).decode("utf-8"))
+                    c_data = c_item.get("data", {}) if isinstance(c_item, dict) and "data" in c_item else c_item
+                    if isinstance(c_data, dict):
+                        c_slug = c_data.get("slug", "") or k.replace("drive_creator_items_", "")
+                        norm_slug = c_slug.split("/")[-1].lower() if c_slug else ""
+                        if not norm_slug or norm_slug in seen_all_slugs:
+                            continue
+                        seen_all_slugs.add(norm_slug)
+                        c_country = c_data.get("country", "Việt Nam")
+                        if country_filter and country_filter.lower() not in ["all", "__all__"]:
+                            if c_country.lower() != country_filter.lower():
+                                continue
+                        all_photos.extend(c_data.get("photos", []))
+                        all_videos.extend(c_data.get("videos", []))
+            except Exception as e:
+                print(f"Lỗi đọc SQLite khi tổng hợp creator all: {e}")
 
             total_items = len(all_photos) + len(all_videos)
             total_size = sum(x.get("size", 0) for x in all_photos + all_videos)

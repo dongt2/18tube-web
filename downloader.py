@@ -881,6 +881,40 @@ def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=
 
     return False, filepath, status
 
+def ensure_linux_rclone():
+    """Tự động tải rclone binary độc lập cho môi trường Linux sandbox (như Botkeep, PaaS không có root)."""
+    if sys.platform == "win32":
+        return None
+    import shutil
+    if shutil.which("rclone"):
+        return shutil.which("rclone")
+    bin_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+    rclone_bin = os.path.join(bin_dir, "rclone")
+    if os.path.isfile(rclone_bin) and os.access(rclone_bin, os.X_OK):
+        return rclone_bin
+
+    print("[*] Đang tự động tải rclone binary độc lập cho Linux...")
+    try:
+        import urllib.request, zipfile, io
+        os.makedirs(bin_dir, exist_ok=True)
+        url = "https://downloads.rclone.org/rclone-current-linux-amd64.zip"
+        req = urllib.request.Request(url, headers={"User-Agent": "18tube-Deployer"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            for name in z.namelist():
+                if name.endswith("/rclone") or name == "rclone":
+                    with z.open(name) as src, open(rclone_bin, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    break
+        if os.path.isfile(rclone_bin):
+            os.chmod(rclone_bin, 0o755)
+            print(f"[OK] Đã tải rclone thành công tại: {rclone_bin}")
+            return rclone_bin
+    except Exception as e:
+        print(f"[!] Không thể tự động tải rclone: {e}")
+    return None
+
 def get_rclone_path():
     """Tìm đường dẫn rclone trong bundle PyInstaller, thư mục bin/ cục bộ hoặc PATH hệ thống."""
     # 1. Kiểm tra PyInstaller bundle hoặc cùng thư mục file exe
@@ -896,7 +930,8 @@ def get_rclone_path():
                 return cand
 
     # 2. Kiểm tra thư mục bin/ cục bộ
-    local_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "rclone.exe")
+    exe_name = "rclone.exe" if sys.platform == "win32" else "rclone"
+    local_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", exe_name)
     if os.path.isfile(local_bin):
         return local_bin
 
@@ -906,7 +941,13 @@ def get_rclone_path():
     if p:
         return p
 
-    # 4. Kiểm tra thư mục winget mặc định nếu có
+    # 4. Tự động tải rclone trên Linux nếu chưa có (Cloud / Botkeep / Render sandbox)
+    if sys.platform != "win32":
+        auto_rc = ensure_linux_rclone()
+        if auto_rc and os.path.isfile(auto_rc):
+            return auto_rc
+
+    # 5. Kiểm tra thư mục winget mặc định nếu có (Windows)
     winget_cand = r"C:\Users\dongt\AppData\Local\Microsoft\WinGet\Packages\Rclone.Rclone_Microsoft.Winget.Source_8wekyb3d8bbwe\rclone-v1.75.1-windows-amd64\rclone.EXE"
     if os.path.isfile(winget_cand):
         return winget_cand

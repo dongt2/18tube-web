@@ -18,6 +18,7 @@
         filteredItems: [],
         mediaTypeFilter: 'all', // 'all', 'video', 'photo'
         searchQuery: '',
+        sortBy: 'date-desc', // 'date-desc', 'date-asc', 'size-desc', 'size-asc', 'name-asc'
         density: 'compact',
 
         // Pagination (60 items / page)
@@ -41,13 +42,14 @@
 
     // DOM Elements
     const elements = {
-        btnSrcLocal: document.getElementById('btn-src-local'),
-        btnSrcDrive: document.getElementById('btn-src-drive'),
+        btnRefreshCache: document.getElementById('btn-refresh-cache'),
         countrySelect: document.getElementById('country-select'),
         countryRibbon: document.getElementById('country-ribbon'),
         creatorSelect: document.getElementById('creator-select'),
         creatorRibbon: document.getElementById('creator-ribbon'),
         gallerySearch: document.getElementById('gallery-search'),
+        btnSearchClear: document.getElementById('btn-search-clear'),
+        mediaSortSelect: document.getElementById('media-sort-select'),
         mediaFilters: document.querySelectorAll('.filter-tab'),
         badgeCntAll: document.getElementById('badge-cnt-all'),
         badgeCntVideo: document.getElementById('badge-cnt-video'),
@@ -55,6 +57,12 @@
         mediaStatusText: document.getElementById('media-status-text'),
         densityBtns: document.querySelectorAll('.density-btn'),
         cinemaGrid: document.getElementById('cinema-grid'),
+
+        // Ribbon scroll buttons
+        btnCountryScrollLeft: document.getElementById('btn-country-scroll-left'),
+        btnCountryScrollRight: document.getElementById('btn-country-scroll-right'),
+        btnCreatorScrollLeft: document.getElementById('btn-creator-scroll-left'),
+        btnCreatorScrollRight: document.getElementById('btn-creator-scroll-right'),
 
         // Theater
         theaterModal: document.getElementById('theater-modal'),
@@ -97,52 +105,117 @@
     };
 
     // ==========================================
-    // UTILITIES
+    // UTILITIES & FORMATTING
     // ==========================================
 
-    function showToast(msg, type = 'info') {
-        const toast = document.createElement('div');
-        toast.style.cssText = `
-            background: #111726;
-            border: 1px solid rgba(0, 242, 254, 0.4);
-            color: #f8fafc;
-            padding: 0.75rem 1.25rem;
-            border-radius: 8px;
-            font-size: 0.82rem;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-            transition: all 0.3s ease;
-        `;
-        toast.textContent = msg;
-        elements.toastContainer.appendChild(toast);
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(10px)';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+    const COUNTRY_FLAG_MAP = {
+        'việt nam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+        '_vietnam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+        'vn': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+
+        'anh': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+        '_uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+        'uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+        'gb': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+
+        'mỹ': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+        '_usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+        'us': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+        'usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+
+        'hàn quốc': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
+        '_korea': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
+        'kr': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
+
+        'nhật bản': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
+        '_japan': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
+        'jp': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
+
+        'trung quốc': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
+        '_china': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
+        'cn': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
+
+        'thái lan': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
+        '_thailand': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
+        'th': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
+
+        'đài loan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
+        '_taiwan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
+        'tw': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
+
+        'malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
+        '_malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
+        'my': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
+
+        'singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
+        '_singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
+        'sg': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
+
+        'indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
+        '_indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
+        'id': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
+
+        'ba lan': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
+        '_poland': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
+        'pl': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
+
+        'úc': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
+        '_australia': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
+        'au': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
+
+        'nga': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
+        '_russia': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
+        'ru': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
+    };
+
+    function getCountryInfo(nameOrCode) {
+        if (!nameOrCode || nameOrCode === 'all' || nameOrCode === '__all__') {
+            return { iso: '', flag: '🌍', name: 'Tất cả' };
+        }
+        const key = String(nameOrCode).trim().toLowerCase();
+        return COUNTRY_FLAG_MAP[key] || { iso: '', flag: '🌐', name: nameOrCode.replace(/^_/, '') };
     }
 
-    // ==========================================
-    // DATA FETCHING
-    // ==========================================
+    function getCountryFlagHtml(nameOrCode) {
+        if (!nameOrCode || nameOrCode === 'all') {
+            return '<span style="font-size:1.05rem;">🌍</span>';
+        }
+        const info = getCountryInfo(nameOrCode);
+        if (info.iso) {
+            return `<img class="country-flag-img" src="https://flagcdn.com/28x21/${info.iso}.png" srcset="https://flagcdn.com/56x42/${info.iso}.png 2x" width="20" height="15" alt="${info.name}" onerror="this.outerHTML='<span>${info.flag}</span>'">`;
+        }
+        return `<span>${info.flag || '🌐'}</span>`;
+    }
 
-    function getCountryLabel(cName) {
-        if (!cName || cName.toLowerCase() === 'all' || cName === '__all__') return '🌍 Tất cả';
-        const lower = cName.toLowerCase();
-        if (lower.includes('việt') || lower.includes('viet') || lower === 'vn') return '🇻🇳 Việt Nam';
-        if (lower.includes('anh') || lower === 'uk' || lower === 'gb') return '🇬🇧 Anh';
-        if (lower.includes('úc') || lower.includes('uc') || lower.includes('australia') || lower === 'au') return '🇦🇺 Úc';
-        if (lower.includes('ba lan') || lower.includes('poland') || lower === 'pl') return '🇵🇱 Ba Lan';
-        if (lower.includes('indonesia') || lower === 'id') return '🇮🇩 Indonesia';
-        if (lower.includes('mỹ') || lower.includes('usa') || lower === 'us') return '🇺🇸 Mỹ';
-        if (lower.includes('nhật') || lower.includes('japan') || lower === 'jp') return '🇯🇵 Nhật Bản';
-        if (lower.includes('hàn') || lower.includes('korea') || lower === 'kr') return '🇰🇷 Hàn Quốc';
-        if (lower.includes('trung') || lower.includes('china') || lower === 'cn') return '🇨🇳 Trung Quốc';
-        if (lower.includes('thái') || lower.includes('thailand') || lower === 'th') return '🇹🇭 Thái Lan';
-        if (lower.includes('đài loan') || lower.includes('taiwan') || lower === 'tw') return '🇹🇼 Đài Loan';
-        if (lower.includes('malaysia') || lower === 'my') return '🇲🇾 Malaysia';
-        if (lower.includes('singapore') || lower === 'sg') return '🇸🇬 Singapore';
-        if (lower.includes('nga') || lower.includes('russia') || lower === 'ru') return '🇷🇺 Nga';
-        return '🌐 ' + cName;
+    function formatDate(isoStr) {
+        if (!isoStr) return '';
+        try {
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return isoStr;
+            const pad = (n) => String(n).padStart(2, '0');
+            const day = pad(d.getDate());
+            const month = pad(d.getMonth() + 1);
+            const year = d.getFullYear();
+            const hours = pad(d.getHours());
+            const minutes = pad(d.getMinutes());
+            return `${day}/${month}/${year} ${hours}:${minutes}`;
+        } catch (_) {
+            return isoStr;
+        }
+    }
+
+    function parseBytesFromStr(sizeStr) {
+        if (!sizeStr) return 0;
+        const parts = sizeStr.trim().split(/\s+/);
+        if (parts.length === 0) return 0;
+        const val = parseFloat(parts[0]);
+        if (isNaN(val)) return 0;
+        const unit = (parts[1] || 'B').toUpperCase();
+        if (unit.startsWith('K')) return val * 1024;
+        if (unit.startsWith('M')) return val * 1024 * 1024;
+        if (unit.startsWith('G')) return val * 1024 * 1024 * 1024;
+        if (unit.startsWith('T')) return val * 1024 * 1024 * 1024 * 1024;
+        return val;
     }
 
     async function loadCreators() {
@@ -206,27 +279,31 @@
 
         const totalCreators = state.creators.length;
 
-        // 1. Dropdown Quốc gia
+        // 1. Dropdown Quốc gia (Select Capsule)
         let selectHtml = `<option value="all">🌍 Tất cả Quốc Gia (${totalCreators})</option>`;
         state.countries.forEach(c => {
-            const flag = c.flag ? `${c.flag} ` : '';
-            selectHtml += `<option value="${c.name}">${flag}${c.name} (${c.count})</option>`;
+            const info = getCountryInfo(c.name);
+            selectHtml += `<option value="${c.name}">${info.flag} ${c.name} (${c.count})</option>`;
         });
         elements.countrySelect.innerHTML = selectHtml;
         elements.countrySelect.value = state.selectedCountry;
 
-        // 2. Ribbon Quốc gia
+        // 2. Ribbon Quốc gia (Smooth Horizontal Scroller with Flag Icons)
         let ribbonHtml = `
             <span class="country-chip ${state.selectedCountry === 'all' ? 'active' : ''}" data-country="all">
-                🌍 Tất cả (${totalCreators})
+                <span class="country-flag-icon">🌍</span>
+                <span class="country-name-text">Tất cả</span>
+                <span class="country-count-pill">${totalCreators}</span>
             </span>
         `;
         state.countries.forEach(c => {
             const isActive = state.selectedCountry === c.name ? 'active' : '';
-            const flag = c.flag ? `${c.flag} ` : '';
+            const flagHtml = getCountryFlagHtml(c.name);
             ribbonHtml += `
                 <span class="country-chip ${isActive}" data-country="${c.name}">
-                    ${flag}${c.name} (${c.count})
+                    ${flagHtml}
+                    <span class="country-name-text">${c.name}</span>
+                    <span class="country-count-pill">${c.count}</span>
                 </span>
             `;
         });
@@ -276,7 +353,7 @@
             if (c.total_files) totalVisibleFiles += c.total_files;
         });
 
-        const allCountStr = totalVisibleFiles > 0 ? ` (${totalVisibleFiles})` : '';
+        const allCountStr = totalVisibleFiles > 0 ? ` (${totalVisibleFiles.toLocaleString('vi-VN')})` : '';
         const allLabel = state.selectedCountry === 'all' ? '🌟 Tất cả Creator' : `🌟 Tất cả (${state.selectedCountry})`;
         const allOption = `<option value="__all__">${allLabel}${allCountStr}</option>`;
 
@@ -286,7 +363,8 @@
             state.countries.forEach(cntry => {
                 const cCreators = state.creators.filter(c => c.country === cntry.name);
                 if (cCreators.length > 0) {
-                    groupsHtml += `<optgroup label="${getCountryLabel(cntry.name)} (${cCreators.length})">`;
+                    const info = getCountryInfo(cntry.name);
+                    groupsHtml += `<optgroup label="${info.flag} ${cntry.name} (${cCreators.length})">`;
                     groupsHtml += cCreators.map(c => {
                         const slug = c.slug || c.name;
                         const dName = c.name || slug;
@@ -312,13 +390,23 @@
 
         // Ribbon Creator
         const allChipActive = state.selectedCreator === '__all__' ? 'active' : '';
-        const allChip = `<span class="creator-chip ${allChipActive}" data-name="__all__">${allLabel}</span>`;
+        const allChip = `
+            <span class="creator-chip ${allChipActive}" data-name="__all__">
+                <span>🌟</span>
+                <span>${allLabel}</span>
+            </span>
+        `;
         elements.creatorRibbon.innerHTML = allChip + visibleCreators.map(c => {
             const slug = c.slug || c.name;
             const dName = c.name || slug;
             const isActive = state.selectedCreator === slug ? 'active' : '';
-            const cFlag = c.country && c.country !== 'Việt Nam' ? `[${c.country}] ` : '';
-            return `<span class="creator-chip ${isActive}" data-name="${slug}">👤 ${cFlag}${dName}</span>`;
+            const cFlagHtml = (c.country && c.country !== 'Việt Nam') ? getCountryFlagHtml(c.country) : '';
+            return `
+                <span class="creator-chip ${isActive}" data-name="${slug}">
+                    ${cFlagHtml || '<span>👤</span>'}
+                    <span>${dName}</span>
+                </span>
+            `;
         }).join('');
 
         elements.creatorRibbon.querySelectorAll('.creator-chip').forEach(chip => {
@@ -459,11 +547,22 @@
         const thumbSrc = it.thumbnail_url || (it.file_id ? `https://lh3.googleusercontent.com/d/${it.file_id}=w500` : it.stream_url);
         const fallbackSrc = it.file_id ? `/api/media/thumbnail?id=${it.file_id}&proxy=1` : '/static/placeholder.svg';
 
+        // Tối ưu tên file: Ẩn tag creator nếu đang chọn 1 creator cụ thể để tránh lặp lại thô kệch
+        const isSpecificCreator = state.selectedCreator && state.selectedCreator !== '__all__';
+        let creatorPrefix = '';
+        if (!isSpecificCreator && it.creator) {
+            const cFlagHtml = (it.country && it.country !== 'Việt Nam') ? `${it.country} • ` : '';
+            creatorPrefix = `<span class="creator-tag-pill">[${cFlagHtml}${it.creator}]</span>`;
+        }
+
+        // Format ngày tháng thân thiện cho người dùng
+        const formattedDate = formatDate(it.date);
+
         return `
             <div class="media-card" data-id="${it.id}" data-type="${it.type}">
                 <div class="media-poster-box">
                     <span class="media-type-badge ${badgeClass}">${badgeText}</span>
-                    <span class="media-size-badge">${it.size_str}</span>
+                    <span class="media-size-badge">${it.size_str || ''}</span>
 
                     <img src="${thumbSrc}" 
                          alt="${it.name}" 
@@ -471,18 +570,18 @@
                          onerror="if(this.getAttribute('data-err')!=='1'){this.setAttribute('data-err','1');this.src='${fallbackSrc}';}else{this.src='/static/placeholder.svg';}">
 
                     ${isVid ? `
-                        <div class="media-play-glow">
+                        <div class="media-play-glow" title="Nhấn để phát video chuẩn Rạp Chiếu">
                             <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
                         </div>
                     ` : ''}
                 </div>
                 <div class="media-meta-box">
                     <span class="media-title" title="${it.name}">
-                        ${it.creator ? `<span class="creator-tag" style="color:#00f2fe;font-size:0.75rem;margin-right:5px;font-weight:600;">[${it.country && it.country !== 'Việt Nam' ? it.country + ' • ' : ''}${it.creator}]</span>` : ''}${it.name}
+                        ${creatorPrefix}${it.name}
                     </span>
                     <div class="media-sub-meta">
-                        <span>${it.size_str}</span>
-                        <span>${it.date || ''}</span>
+                        <span class="meta-size-text">${it.size_str || ''}</span>
+                        <span class="meta-date-text" title="${it.date || ''}">${formattedDate}</span>
                     </div>
                 </div>
             </div>
@@ -631,10 +730,10 @@
         state.currentPage = page;
         renderGridPage();
 
-        // Cuộn mượt lên đầu danh sách ảnh
-        const subbar = document.querySelector('.gallery-subbar');
-        if (subbar) {
-            subbar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Cuộn mượt lên đầu danh sách media
+        const main = document.querySelector('.gallery-main');
+        if (main) {
+            main.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } else {
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -643,17 +742,35 @@
     function filterAndRenderGrid() {
         let items = [...state.mediaItems];
 
-        // Type filter
+        // 1. Lọc theo Loại media (All, Video, Photo)
         if (state.mediaTypeFilter === 'video') {
             items = items.filter(it => it.type === 'video');
         } else if (state.mediaTypeFilter === 'photo') {
             items = items.filter(it => it.type === 'photo');
         }
 
-        // Search
+        // 2. Tìm kiếm (Tìm theo tên file, tên creator, quốc gia)
         const q = state.searchQuery.trim().toLowerCase();
         if (q) {
-            items = items.filter(it => it.name.toLowerCase().includes(q) || (it.creator && it.creator.toLowerCase().includes(q)) || (it.country && it.country.toLowerCase().includes(q)));
+            items = items.filter(it => 
+                it.name.toLowerCase().includes(q) || 
+                (it.creator && it.creator.toLowerCase().includes(q)) || 
+                (it.country && it.country.toLowerCase().includes(q))
+            );
+        }
+
+        // 3. Sắp xếp (Sorting)
+        const sort = state.sortBy || 'date-desc';
+        if (sort === 'date-desc') {
+            items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        } else if (sort === 'date-asc') {
+            items.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        } else if (sort === 'size-desc') {
+            items.sort((a, b) => parseBytesFromStr(b.size_str) - parseBytesFromStr(a.size_str));
+        } else if (sort === 'size-asc') {
+            items.sort((a, b) => parseBytesFromStr(a.size_str) - parseBytesFromStr(b.size_str));
+        } else if (sort === 'name-asc') {
+            items.sort((a, b) => a.name.localeCompare(b.name));
         }
 
         state.filteredItems = items;
@@ -939,24 +1056,15 @@
     // ==========================================
 
     function initEvents() {
-        // Source switch (nếu có nút bấm)
-        if (elements.btnSrcLocal) {
-            elements.btnSrcLocal.addEventListener('click', () => {
-                if (state.source === 'local') return;
-                state.source = 'local';
-                elements.btnSrcLocal.classList.add('active');
-                if (elements.btnSrcDrive) elements.btnSrcDrive.classList.remove('active');
-                loadCreators();
-            });
-        }
-
-        if (elements.btnSrcDrive) {
-            elements.btnSrcDrive.addEventListener('click', () => {
-                if (state.source === 'drive') return;
-                state.source = 'drive';
-                elements.btnSrcDrive.classList.add('active');
-                if (elements.btnSrcLocal) elements.btnSrcLocal.classList.remove('active');
-                loadCreators();
+        // Refresh / Sync Cache Button
+        if (elements.btnRefreshCache) {
+            elements.btnRefreshCache.addEventListener('click', async () => {
+                elements.btnRefreshCache.classList.add('refreshing');
+                state.creatorCache = {};
+                showToast('Đang đồng bộ dữ liệu mới nhất từ Google Drive...', 'info');
+                await loadCreators();
+                elements.btnRefreshCache.classList.remove('refreshing');
+                showToast('Đã đồng bộ xong dữ liệu!', 'info');
             });
         }
 
@@ -968,9 +1076,11 @@
         }
 
         // Creator select dropdown
-        elements.creatorSelect.addEventListener('change', (e) => {
-            selectCreator(e.target.value);
-        });
+        if (elements.creatorSelect) {
+            elements.creatorSelect.addEventListener('change', (e) => {
+                selectCreator(e.target.value);
+            });
+        }
 
         // Filter tabs (All, Video, Photo)
         elements.mediaFilters.forEach(tab => {
@@ -982,11 +1092,73 @@
             });
         });
 
-        // Search input
-        elements.gallerySearch.addEventListener('input', (e) => {
-            state.searchQuery = e.target.value;
-            filterAndRenderGrid();
-        });
+        // Search input & Clear button
+        if (elements.gallerySearch) {
+            elements.gallerySearch.addEventListener('input', (e) => {
+                state.searchQuery = e.target.value;
+                if (elements.btnSearchClear) {
+                    elements.btnSearchClear.style.display = state.searchQuery ? 'flex' : 'none';
+                }
+                filterAndRenderGrid();
+            });
+        }
+
+        if (elements.btnSearchClear) {
+            elements.btnSearchClear.addEventListener('click', () => {
+                if (elements.gallerySearch) {
+                    elements.gallerySearch.value = '';
+                    elements.gallerySearch.focus();
+                }
+                state.searchQuery = '';
+                elements.btnSearchClear.style.display = 'none';
+                filterAndRenderGrid();
+            });
+        }
+
+        // Sort Selector
+        if (elements.mediaSortSelect) {
+            elements.mediaSortSelect.addEventListener('change', (e) => {
+                state.sortBy = e.target.value;
+                filterAndRenderGrid();
+            });
+        }
+
+        // Smooth Mouse Wheel Horizontal Scroll for Ribbons
+        const setupHorizontalWheelScroll = (el) => {
+            if (!el) return;
+            el.addEventListener('wheel', (e) => {
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    el.scrollLeft += e.deltaY;
+                }
+            }, { passive: false });
+        };
+        setupHorizontalWheelScroll(elements.countryRibbon);
+        setupHorizontalWheelScroll(elements.creatorRibbon);
+
+        // Arrow buttons for Country Ribbon
+        if (elements.btnCountryScrollLeft && elements.countryRibbon) {
+            elements.btnCountryScrollLeft.addEventListener('click', () => {
+                elements.countryRibbon.scrollBy({ left: -240, behavior: 'smooth' });
+            });
+        }
+        if (elements.btnCountryScrollRight && elements.countryRibbon) {
+            elements.btnCountryScrollRight.addEventListener('click', () => {
+                elements.countryRibbon.scrollBy({ left: 240, behavior: 'smooth' });
+            });
+        }
+
+        // Arrow buttons for Creator Ribbon
+        if (elements.btnCreatorScrollLeft && elements.creatorRibbon) {
+            elements.btnCreatorScrollLeft.addEventListener('click', () => {
+                elements.creatorRibbon.scrollBy({ left: -260, behavior: 'smooth' });
+            });
+        }
+        if (elements.btnCreatorScrollRight && elements.creatorRibbon) {
+            elements.btnCreatorScrollRight.addEventListener('click', () => {
+                elements.creatorRibbon.scrollBy({ left: 260, behavior: 'smooth' });
+            });
+        }
 
         // Density toggle
         elements.densityBtns.forEach(btn => {
@@ -1112,6 +1284,22 @@
 
         // KEYBOARD SHORTCUTS
         document.addEventListener('keydown', (e) => {
+            // Search shortcut: Nhấn '/' khi không đang nhập ô input
+            if (e.key === '/' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                if (elements.gallerySearch) {
+                    elements.gallerySearch.focus();
+                    elements.gallerySearch.select();
+                }
+                return;
+            }
+
+            // Thoát khỏi ô tìm kiếm khi nhấn ESC
+            if (e.key === 'Escape' && document.activeElement === elements.gallerySearch) {
+                elements.gallerySearch.blur();
+                return;
+            }
+
             // If in Theater video
             if (elements.theaterModal.classList.contains('active')) {
                 if (e.key === 'Escape') closeTheater();

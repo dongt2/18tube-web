@@ -946,6 +946,7 @@ def ensure_linux_rclone():
         return shutil.which("rclone")
 
     cand_dirs = [
+        os.path.expanduser("~/.local/bin"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin"),
         "/tmp/bin",
         "/tmp"

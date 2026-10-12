@@ -881,6 +881,62 @@ def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=
 
     return False, filepath, status
 
+def init_cloud_rclone_config():
+    """Tự động giải mã và nạp cấu hình Rclone từ biến môi trường trên Cloud (Botkeep, Render, Railway, v.v.)."""
+    b64_val = os.environ.get("RCLONE_CONFIG_BASE64", "").strip()
+    raw_val = os.environ.get("RCLONE_CONFIG", "").strip()
+
+    # Nếu biến RCLONE_CONFIG là đường dẫn tới file đang tồn tại thì giữ nguyên
+    if raw_val and os.path.isfile(raw_val):
+        return raw_val
+
+    if not b64_val and (not raw_val or "\n" not in raw_val):
+        return None
+
+    # Xác định thư mục lưu file config
+    target_dirs = []
+    if sys.platform != "win32":
+        target_dirs = [
+            os.path.expanduser("~/.config/rclone"),
+            "/tmp/rclone",
+            "/tmp",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), ".rclone")
+        ]
+    else:
+        target_dirs = [
+            os.path.expandvars(r"%APPDATA%\rclone"),
+            os.path.expanduser("~/.config/rclone")
+        ]
+
+    conf_content = ""
+    if b64_val:
+        try:
+            import base64
+            clean_b64 = "".join(b64_val.split())
+            conf_content = base64.b64decode(clean_b64.encode("ascii")).decode("utf-8")
+        except Exception as e:
+            print(f"[!] Lỗi giải mã Base64 RCLONE_CONFIG_BASE64: {e}")
+            return None
+    elif raw_val and ("[" in raw_val and "]" in raw_val):
+        conf_content = raw_val
+
+    if not conf_content:
+        return None
+
+    for candidate_dir in target_dirs:
+        try:
+            os.makedirs(candidate_dir, exist_ok=True)
+            candidate_file = os.path.join(candidate_dir, "rclone.conf")
+            with open(candidate_file, "w", encoding="utf-8") as f:
+                f.write(conf_content)
+            os.environ["RCLONE_CONFIG"] = candidate_file
+            print(f"[OK] Đã tự động nạp cấu hình Rclone từ môi trường vào: {candidate_file}")
+            return candidate_file
+        except Exception:
+            continue
+
+    return None
+
 def ensure_linux_rclone():
     """Tự động tải rclone binary độc lập cho môi trường Linux sandbox (như Botkeep, PaaS không có root)."""
     if sys.platform == "win32":
@@ -888,35 +944,51 @@ def ensure_linux_rclone():
     import shutil
     if shutil.which("rclone"):
         return shutil.which("rclone")
-    bin_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
-    rclone_bin = os.path.join(bin_dir, "rclone")
-    if os.path.isfile(rclone_bin) and os.access(rclone_bin, os.X_OK):
-        return rclone_bin
+
+    cand_dirs = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin"),
+        "/tmp/bin",
+        "/tmp"
+    ]
+    for d in cand_dirs:
+        rc = os.path.join(d, "rclone")
+        if os.path.isfile(rc) and os.access(rc, os.X_OK):
+            if d not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = f"{d}:{os.environ.get('PATH', '')}"
+            return rc
 
     print("[*] Đang tự động tải rclone binary độc lập cho Linux...")
-    try:
-        import urllib.request, zipfile, io
-        os.makedirs(bin_dir, exist_ok=True)
-        url = "https://downloads.rclone.org/rclone-current-linux-amd64.zip"
-        req = urllib.request.Request(url, headers={"User-Agent": "18tube-Deployer"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read()
-        with zipfile.ZipFile(io.BytesIO(data)) as z:
-            for name in z.namelist():
-                if name.endswith("/rclone") or name == "rclone":
-                    with z.open(name) as src, open(rclone_bin, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    break
-        if os.path.isfile(rclone_bin):
-            os.chmod(rclone_bin, 0o755)
-            print(f"[OK] Đã tải rclone thành công tại: {rclone_bin}")
-            return rclone_bin
-    except Exception as e:
-        print(f"[!] Không thể tự động tải rclone: {e}")
+    for target_dir in cand_dirs:
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            rclone_bin = os.path.join(target_dir, "rclone")
+            import urllib.request, zipfile, io
+            url = "https://downloads.rclone.org/rclone-current-linux-amd64.zip"
+            req = urllib.request.Request(url, headers={"User-Agent": "18tube-Deployer"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = resp.read()
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                for name in z.namelist():
+                    if name.endswith("/rclone") or name == "rclone":
+                        with z.open(name) as src, open(rclone_bin, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        break
+            if os.path.isfile(rclone_bin):
+                os.chmod(rclone_bin, 0o755)
+                if target_dir not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = f"{target_dir}:{os.environ.get('PATH', '')}"
+                print(f"[OK] Đã tải rclone thành công tại: {rclone_bin}")
+                return rclone_bin
+        except Exception as e:
+            print(f"[!] Không thể cài rclone vào {target_dir}: {e}")
+            continue
+
     return None
 
 def get_rclone_path():
     """Tìm đường dẫn rclone trong bundle PyInstaller, thư mục bin/ cục bộ hoặc PATH hệ thống."""
+    # Đảm bảo cấu hình từ biến môi trường đã được nạp nếu đang chạy Cloud
+    init_cloud_rclone_config()
     # 1. Kiểm tra PyInstaller bundle hoặc cùng thư mục file exe
     if getattr(sys, 'frozen', False):
         base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))

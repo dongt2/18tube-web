@@ -26,6 +26,12 @@ from flask import Flask, render_template, jsonify, request, send_file, abort, Re
 # Import core helpers from downloader
 import downloader
 
+# Tự động nạp cấu hình Google Drive Rclone từ biến môi trường trên Cloud (Botkeep, Render, v.v.)
+try:
+    downloader.init_cloud_rclone_config()
+except Exception as _e:
+    print(f"Cảnh báo nạp cấu hình Rclone: {_e}")
+
 SUBPROCESS_EXTRA = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 
 app = Flask(

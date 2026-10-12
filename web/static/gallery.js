@@ -259,8 +259,21 @@
             renderCreatorsList();
 
             if (state.creators.length > 0) {
-                const first = state.creators[0].slug || state.creators[0].name;
-                selectCreator(first);
+                let targetCreator = state.creators[0].slug || state.creators[0].name;
+                const urlParams = new URLSearchParams(window.location.search);
+                const queryCreator = urlParams.get('creator');
+                if (queryCreator) {
+                    const match = state.creators.find(c => c.slug === queryCreator || c.name === queryCreator || (c.slug && c.slug.endsWith('/' + queryCreator)));
+                    if (match) {
+                        targetCreator = match.slug || match.name;
+                        if (match.country && match.country !== 'Việt Nam') {
+                            state.selectedCountry = match.country;
+                            renderCountriesList();
+                            renderCreatorsList();
+                        }
+                    }
+                }
+                selectCreator(targetCreator);
             } else {
                 elements.cinemaGrid.innerHTML = `
                     <div class="cinema-empty">

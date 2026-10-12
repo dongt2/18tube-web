@@ -18,6 +18,10 @@
         driveSearch: '',
         driveView: 'grid',
 
+        // Overview Filter & Sort
+        overviewCountryFilter: 'all',
+        overviewSort: 'files_desc',
+
         localRoots: [],
         currentLocalRoot: '',
         localCreators: [],
@@ -55,6 +59,11 @@
         mCloudQuota: document.getElementById('m-cloud-quota'),
         overviewBadge: document.getElementById('overview-badge'),
         overviewSearch: document.getElementById('overview-search'),
+        btnOverviewSearchClear: document.getElementById('btn-overview-search-clear'),
+        overviewSortSelect: document.getElementById('overview-sort-select'),
+        overviewCountryRibbon: document.getElementById('overview-country-ribbon'),
+        btnOverviewCountryLeft: document.getElementById('btn-overview-country-left'),
+        btnOverviewCountryRight: document.getElementById('btn-overview-country-right'),
         overviewGrid: document.getElementById('overview-creators-grid'),
 
         // Drive Explorer
@@ -141,8 +150,108 @@
     };
 
     // ==========================================
-    // UTILITIES
+    // UTILITIES & FLAG MAPPING
     // ==========================================
+
+    const COUNTRY_FLAG_MAP = {
+        'việt nam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+        '_vietnam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+        'vn': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+
+        'anh': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+        '_uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+        'uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+        'gb': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+
+        'mỹ': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+        '_usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+        'us': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+        'usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
+
+        'hàn quốc': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
+        '_korea': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
+        'kr': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
+
+        'nhật bản': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
+        '_japan': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
+        'jp': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
+
+        'trung quốc': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
+        '_china': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
+        'cn': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
+
+        'thái lan': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
+        '_thailand': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
+        'th': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
+
+        'đài loan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
+        '_taiwan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
+        'tw': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
+
+        'malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
+        '_malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
+        'my': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
+
+        'singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
+        '_singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
+        'sg': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
+
+        'indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
+        '_indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
+        'id': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
+
+        'ba lan': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
+        '_poland': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
+        'pl': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
+
+        'úc': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
+        '_australia': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
+        'au': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
+
+        'nga': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
+        '_russia': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
+        'ru': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
+    };
+
+    function getCountryInfo(nameOrCode) {
+        if (!nameOrCode || nameOrCode === 'all' || nameOrCode === '__all__') {
+            return { iso: '', flag: '🌍', name: 'Tất cả' };
+        }
+        const key = String(nameOrCode).trim().toLowerCase();
+        return COUNTRY_FLAG_MAP[key] || { iso: '', flag: '🌐', name: nameOrCode.replace(/^_/, '') };
+    }
+
+    function getCountryFlagHtml(nameOrCode) {
+        if (!nameOrCode || nameOrCode === 'all') {
+            return '<span>🌍</span>';
+        }
+        const info = getCountryInfo(nameOrCode);
+        if (info.iso) {
+            return `<img class="country-flag-icon-img" src="https://flagcdn.com/28x21/${info.iso}.png" srcset="https://flagcdn.com/56x42/${info.iso}.png 2x" width="18" height="14" alt="${info.name}" title="${info.name}" onerror="this.outerHTML='<span>${info.flag}</span>'">`;
+        }
+        return `<span>${info.flag || '🌐'}</span>`;
+    }
+
+    const GRADIENT_PALETTES = [
+        'linear-gradient(135deg, #0284c7, #06b6d4)', // Cyan Sky
+        'linear-gradient(135deg, #7c3aed, #a855f7)', // Purple Lavender
+        'linear-gradient(135deg, #059669, #10b981)', // Emerald Mint
+        'linear-gradient(135deg, #ea580c, #f59e0b)', // Amber Sunset
+        'linear-gradient(135deg, #e11d48, #f43f5e)', // Rose Coral
+        'linear-gradient(135deg, #4f46e5, #6366f1)', // Indigo Royal
+        'linear-gradient(135deg, #0d9488, #14b8a6)', // Teal Marine
+        'linear-gradient(135deg, #c026d3, #e879f9)', // Fuchsia Magenta
+    ];
+
+    function getAvatarGradient(name) {
+        if (!name) return GRADIENT_PALETTES[0];
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const index = Math.abs(hash) % GRADIENT_PALETTES.length;
+        return GRADIENT_PALETTES[index];
+    }
 
     function showToast(message, type = 'info') {
         const toast = document.createElement('div');
@@ -165,7 +274,7 @@
     }
 
     function formatDate(dateStr) {
-        if (!dateStr) return '--';
+        if (!dateStr) return '';
         try {
             const d = new Date(dateStr);
             if (isNaN(d.getTime())) return dateStr;
@@ -279,8 +388,7 @@
         const totalCreators = summary.total_creators || 0;
         const totalFiles = summary.total_files || 0;
         elements.mCreatorsCount.textContent = totalCreators;
-        elements.mTotalFiles.textContent = totalFiles.toLocaleString();
-        elements.overviewBadge.textContent = `${totalCreators} Creator`;
+        elements.mTotalFiles.textContent = totalFiles.toLocaleString('vi-VN');
         elements.tabDriveCount.textContent = totalCreators;
         elements.driveSidebarCount.textContent = totalCreators;
 
@@ -291,59 +399,153 @@
             totalPhotos += c.photos_count || 0;
             totalVideos += c.videos_count || 0;
         });
-        elements.mFilesRatio.textContent = `${totalPhotos.toLocaleString()} Ảnh / ${totalVideos.toLocaleString()} Video`;
+        elements.mFilesRatio.textContent = `${totalPhotos.toLocaleString('vi-VN')} Ảnh / ${totalVideos.toLocaleString('vi-VN')} Video`;
 
-        // Render Creator Cards Grid
+        // Render Country Filter Ribbon & Cards Grid
+        renderOverviewCountryRibbon(summary.creators || []);
         renderOverviewCards(summary.creators || []);
     }
 
+    function renderOverviewCountryRibbon(creators) {
+        if (!elements.overviewCountryRibbon) return;
+
+        // Thống kê số creator theo quốc gia
+        const countryCounts = {};
+        creators.forEach(c => {
+            const countryName = c.country || 'Việt Nam';
+            countryCounts[countryName] = (countryCounts[countryName] || 0) + 1;
+        });
+
+        const sortedCountries = Object.keys(countryCounts).sort((a, b) => {
+            if (a === 'Việt Nam') return -1;
+            if (b === 'Việt Nam') return 1;
+            return a.localeCompare(b);
+        });
+
+        let ribbonHtml = `
+            <span class="country-chip ${state.overviewCountryFilter === 'all' ? 'active' : ''}" data-country="all">
+                <span class="country-flag-icon">🌍</span>
+                <span class="country-name-text">Tất cả</span>
+                <span class="country-count-pill">${creators.length}</span>
+            </span>
+        `;
+
+        sortedCountries.forEach(cntry => {
+            const isActive = state.overviewCountryFilter === cntry ? 'active' : '';
+            const flagHtml = getCountryFlagHtml(cntry);
+            ribbonHtml += `
+                <span class="country-chip ${isActive}" data-country="${cntry}">
+                    ${flagHtml}
+                    <span class="country-name-text">${cntry}</span>
+                    <span class="country-count-pill">${countryCounts[cntry]}</span>
+                </span>
+            `;
+        });
+
+        elements.overviewCountryRibbon.innerHTML = ribbonHtml;
+
+        // Gắn sự kiện click chọn quốc gia
+        elements.overviewCountryRibbon.querySelectorAll('.country-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const cName = chip.getAttribute('data-country');
+                state.overviewCountryFilter = cName;
+                elements.overviewCountryRibbon.querySelectorAll('.country-chip').forEach(c => {
+                    c.classList.toggle('active', c.getAttribute('data-country') === cName);
+                });
+                renderOverviewCards(state.driveCreators || []);
+            });
+        });
+    }
+
     function renderOverviewCards(creators) {
-        const query = elements.overviewSearch.value.trim().toLowerCase();
-        const filtered = creators.filter(c => c.slug.toLowerCase().includes(query) || (c.country && c.country.toLowerCase().includes(query)));
+        const query = elements.overviewSearch ? elements.overviewSearch.value.trim().toLowerCase() : '';
+        let filtered = creators.filter(c => {
+            const matchesQuery = !query || c.slug.toLowerCase().includes(query) || (c.country && c.country.toLowerCase().includes(query));
+            const matchesCountry = state.overviewCountryFilter === 'all' || (c.country || 'Việt Nam') === state.overviewCountryFilter;
+            return matchesQuery && matchesCountry;
+        });
+
+        // Sắp xếp (Sorting)
+        const sort = state.overviewSort || 'files_desc';
+        if (sort === 'files_desc') {
+            filtered.sort((a, b) => (b.total_files || 0) - (a.total_files || 0));
+        } else if (sort === 'size_desc') {
+            filtered.sort((a, b) => (b.total_size || 0) - (a.total_size || 0));
+        } else if (sort === 'videos_desc') {
+            filtered.sort((a, b) => (b.videos_count || 0) - (a.videos_count || 0));
+        } else if (sort === 'photos_desc') {
+            filtered.sort((a, b) => (b.photos_count || 0) - (a.photos_count || 0));
+        } else if (sort === 'name_asc') {
+            filtered.sort((a, b) => (a.name || a.slug).localeCompare(b.name || b.slug));
+        }
+
+        if (elements.overviewBadge) {
+            elements.overviewBadge.textContent = `${filtered.length} Creator`;
+        }
 
         if (filtered.length === 0) {
             elements.overviewGrid.innerHTML = `
                 <div class="empty-placeholder">
-                    <span>Không tìm thấy creator nào phù hợp với "${query}"</span>
+                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <span>Không tìm thấy creator nào phù hợp</span>
                 </div>
             `;
             return;
         }
 
         elements.overviewGrid.innerHTML = filtered.map(c => {
-            const initial = (c.name || c.slug).charAt(0).toUpperCase();
-            const flag = c.country_flag || (c.country === 'Việt Nam' ? '🇻🇳' : '🌐');
-            const countryBadge = (c.country && c.country !== 'Việt Nam') 
-                ? `<span style="color:#00f2fe;font-size:0.75rem;margin-right:4px;">${flag} [${c.country}]</span>` 
-                : `<span style="opacity:0.7;font-size:0.75rem;margin-right:4px;">${flag}</span>`;
+            const initial = (c.name || c.slug.split('/').pop() || 'C').charAt(0).toUpperCase();
+            const avatarBg = getAvatarGradient(c.name || c.slug);
+            const flagHtml = getCountryFlagHtml(c.country);
+            const countryName = c.country || 'Việt Nam';
+            const countryTag = (c.country && c.country !== 'Việt Nam') 
+                ? `<span class="creator-country-tag">${flagHtml} ${countryName}</span>` 
+                : `<span class="creator-country-tag default">${flagHtml}</span>`;
+
             return `
                 <div class="creator-card" data-slug="${c.slug}">
                     <div class="creator-card-header">
-                        <div class="creator-avatar-box">${initial}</div>
+                        <div class="creator-avatar-box" style="background: ${avatarBg};">
+                            <span>${initial}</span>
+                        </div>
                         <div class="creator-info">
-                            <h4 class="creator-title">${countryBadge}${c.name || c.slug}</h4>
-                            <span class="creator-time">${formatDate(c.mod_time)}</span>
+                            <div class="creator-title-row">
+                                ${countryTag}
+                                <h4 class="creator-title" title="${c.name || c.slug}">${c.name || c.slug}</h4>
+                            </div>
+                            <div class="creator-meta-line">
+                                <span>📦 ${(c.total_files || 0).toLocaleString('vi-VN')} tệp</span>
+                                <span>•</span>
+                                <span>${countryName}</span>
+                            </div>
                         </div>
                     </div>
                     <div class="creator-card-stats">
                         <div class="substat-item">
-                            <span class="substat-val">${c.photos_count || 0}</span>
-                            <span class="substat-lbl">Ảnh</span>
+                            <span class="substat-val">${(c.photos_count || 0).toLocaleString('vi-VN')}</span>
+                            <span class="substat-lbl">📸 Ảnh</span>
                         </div>
                         <div class="substat-item">
-                            <span class="substat-val">${c.videos_count || 0}</span>
-                            <span class="substat-lbl">Video</span>
+                            <span class="substat-val">${(c.videos_count || 0).toLocaleString('vi-VN')}</span>
+                            <span class="substat-lbl">🎬 Video</span>
                         </div>
                         <div class="substat-item">
                             <span class="substat-val">${c.total_size_str || '0 B'}</span>
-                            <span class="substat-lbl">Dung lượng</span>
+                            <span class="substat-lbl">💾 Dung lượng</span>
                         </div>
                     </div>
                     <div class="creator-card-footer">
-                        <span class="badge badge-success">✓ Đã đồng bộ</span>
-                        <button class="btn btn-secondary btn-sm btn-inspect-drive" data-slug="${c.slug}">
-                            Khám phá file →
-                        </button>
+                        <span class="badge badge-success">
+                            <span class="pulse-dot-mini"></span> Sẵn sàng
+                        </span>
+                        <div class="card-footer-btns">
+                            <a href="/gallery?creator=${encodeURIComponent(c.slug)}" target="_blank" class="btn btn-secondary btn-sm btn-gallery-jump" title="Mở trình xem Gallery cho Creator này" data-slug="${c.slug}">
+                                🎬 Gallery
+                            </a>
+                            <button class="btn btn-primary btn-sm btn-inspect-drive" data-slug="${c.slug}" title="Kiểm tra chi tiết file trên Inspector">
+                                Khám phá →
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -351,8 +553,27 @@
 
         // Gắn sự kiện click
         elements.overviewGrid.querySelectorAll('.creator-card').forEach(card => {
-            card.addEventListener('click', (e) => {
-                const slug = card.getAttribute('data-slug');
+            const slug = card.getAttribute('data-slug');
+            
+            // Nút Khám phá
+            const inspectBtn = card.querySelector('.btn-inspect-drive');
+            if (inspectBtn) {
+                inspectBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    switchToDriveTabAndSelect(slug);
+                });
+            }
+
+            // Nút Gallery jump
+            const galleryBtn = card.querySelector('.btn-gallery-jump');
+            if (galleryBtn) {
+                galleryBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+            }
+
+            // Click vào toàn card
+            card.addEventListener('click', () => {
                 switchToDriveTabAndSelect(slug);
             });
         });
@@ -370,12 +591,11 @@
 
         elements.driveNavList.innerHTML = filtered.map(c => {
             const isActive = state.selectedDriveCreator === c.slug ? 'active' : '';
-            const flag = c.country_flag || (c.country === 'Việt Nam' ? '🇻🇳' : '🌐');
-            const cFlag = (c.country && c.country !== 'Việt Nam') ? `${flag} [${c.country}] ` : `${flag} `;
+            const flagHtml = getCountryFlagHtml(c.country);
             return `
                 <li class="creator-nav-item ${isActive}" data-slug="${c.slug}">
-                    <span>${cFlag}${c.name || c.slug}</span>
-                    <span class="count-pill">${c.total_files || 0}</span>
+                    <span class="nav-item-title">${flagHtml} ${c.name || c.slug}</span>
+                    <span class="count-pill">${(c.total_files || 0).toLocaleString('vi-VN')}</span>
                 </li>
             `;
         }).join('');
@@ -1016,12 +1236,54 @@
             window.open('https://drive.google.com/drive/u/0/my-drive', '_blank');
         });
 
-        // Tìm kiếm Overview
-        elements.overviewSearch.addEventListener('input', () => {
-            if (state.driveSummary && state.driveSummary.creators) {
-                renderOverviewCards(state.driveSummary.creators);
-            }
-        });
+        // Tìm kiếm Overview & Nút xóa
+        if (elements.overviewSearch) {
+            elements.overviewSearch.addEventListener('input', () => {
+                const val = elements.overviewSearch.value.trim();
+                if (elements.btnOverviewSearchClear) {
+                    elements.btnOverviewSearchClear.style.display = val ? 'flex' : 'none';
+                }
+                renderOverviewCards(state.driveCreators || []);
+            });
+        }
+        if (elements.btnOverviewSearchClear) {
+            elements.btnOverviewSearchClear.addEventListener('click', () => {
+                if (elements.overviewSearch) {
+                    elements.overviewSearch.value = '';
+                    elements.btnOverviewSearchClear.style.display = 'none';
+                    elements.overviewSearch.focus();
+                    renderOverviewCards(state.driveCreators || []);
+                }
+            });
+        }
+
+        // Sắp xếp Overview
+        if (elements.overviewSortSelect) {
+            elements.overviewSortSelect.addEventListener('change', () => {
+                state.overviewSort = elements.overviewSortSelect.value;
+                renderOverviewCards(state.driveCreators || []);
+            });
+        }
+
+        // Cuộn ngang dải lọc quốc gia Overview (Buttons & Wheel)
+        if (elements.btnOverviewCountryLeft && elements.overviewCountryRibbon) {
+            elements.btnOverviewCountryLeft.addEventListener('click', () => {
+                elements.overviewCountryRibbon.scrollBy({ left: -280, behavior: 'smooth' });
+            });
+        }
+        if (elements.btnOverviewCountryRight && elements.overviewCountryRibbon) {
+            elements.btnOverviewCountryRight.addEventListener('click', () => {
+                elements.overviewCountryRibbon.scrollBy({ left: 280, behavior: 'smooth' });
+            });
+        }
+        if (elements.overviewCountryRibbon) {
+            elements.overviewCountryRibbon.addEventListener('wheel', (e) => {
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    elements.overviewCountryRibbon.scrollLeft += e.deltaY;
+                }
+            }, { passive: false });
+        }
 
         // Lọc Drive Creator Sidebar
         elements.driveCreatorFilter.addEventListener('input', () => {

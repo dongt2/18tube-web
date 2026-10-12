@@ -12,6 +12,7 @@ import time
 import re
 import mimetypes
 import hashlib
+import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -41,9 +42,26 @@ CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".drive_ca
 _cache = {}
 _cache_lock = threading.Lock()
 _save_lock = threading.Lock()
+_save_timer = None
+_save_timer_lock = threading.Lock()
+
+def _cleanup_stale_tmp_files():
+    """Dọn dẹp các file cache tạm cũ do tiến trình trước để lại."""
+    try:
+        cache_dir = os.path.dirname(os.path.abspath(CACHE_FILE))
+        prefix = os.path.basename(CACHE_FILE) + ".tmp"
+        for fname in os.listdir(cache_dir):
+            if fname.startswith(prefix):
+                try:
+                    os.remove(os.path.join(cache_dir, fname))
+                except OSError:
+                    pass
+    except Exception:
+        pass
 
 def _load_cache_from_disk():
     global _cache
+    _cleanup_stale_tmp_files()
     if os.path.isfile(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
@@ -66,17 +84,63 @@ def _load_cache_from_disk():
             print(f"Lỗi nạp cache từ đĩa: {e}")
 
 def _save_cache_to_disk():
+    """Ghi cache RAM ra đĩa an toàn đa tiến trình, retry xử lý xung đột Windows File Lock."""
     with _save_lock:
+        tmp_file = None
         try:
             with _cache_lock:
                 data_to_save = dict(_cache)
-            tmp_file = CACHE_FILE + ".tmp"
+
+            # Đặt tên file tạm duy nhất theo PID + Thread ID + Timestamp để không bao giờ bị đụng độ file
+            pid = os.getpid()
+            tid = threading.get_ident()
+            timestamp = int(time.time() * 1000)
+            tmp_file = f"{CACHE_FILE}.tmp.{pid}.{tid}.{timestamp}"
+
             with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(data_to_save, f, ensure_ascii=False)
-            if os.path.isfile(tmp_file):
-                os.replace(tmp_file, CACHE_FILE)
+
+            # Trên Windows, os.replace có thể tạm thời gặp WinError 32 nếu file đang bị scanner/đọc mở.
+            # Retry tối đa 10 lần với thời gian chờ tăng dần.
+            success = False
+            last_err = None
+            for attempt in range(10):
+                try:
+                    os.replace(tmp_file, CACHE_FILE)
+                    success = True
+                    break
+                except (PermissionError, OSError) as pe:
+                    last_err = pe
+                    time.sleep(0.15 * (attempt + 1))
+
+            if not success:
+                # Phương án dự phòng: thử sao chép đè nếu replace không thành công
+                try:
+                    shutil.copyfile(tmp_file, CACHE_FILE)
+                    success = True
+                except Exception as ce:
+                    print(f"Cảnh báo: File cache đang bị tiến trình khác truy cập, sẽ tự động lưu lại ở lần tiếp theo: {last_err or ce}")
         except Exception as e:
             print(f"Lỗi khi lưu cache ra đĩa: {e}")
+        finally:
+            if tmp_file and os.path.isfile(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
+
+def _trigger_save_cache_debounced(delay=1.5):
+    """Debounce ghi cache: gom nhiều lần set_cached liên tiếp thành 1 lần ghi ra đĩa duy nhất."""
+    global _save_timer
+    with _save_timer_lock:
+        if _save_timer is not None:
+            try:
+                _save_timer.cancel()
+            except Exception:
+                pass
+        _save_timer = threading.Timer(delay, _save_cache_to_disk)
+        _save_timer.daemon = True
+        _save_timer.start()
 
 # Khởi tạo nạp cache sẵn từ đĩa ngay khi server khởi động
 _load_cache_from_disk()
@@ -99,17 +163,27 @@ def set_cached(key, data):
             "data": data,
             "timestamp": time.time()
         }
-    # Lưu đệm ngầm ra đĩa (non-blocking)
-    threading.Thread(target=_save_cache_to_disk, daemon=True).start()
+    # Gom cụm lưu đĩa ngầm (debounced) tránh nghẽn I/O và xung đột file
+    _trigger_save_cache_debounced(delay=1.5)
 
 def clear_cache():
+    global _save_timer
+    with _save_timer_lock:
+        if _save_timer is not None:
+            try:
+                _save_timer.cancel()
+            except Exception:
+                pass
+            _save_timer = None
     with _cache_lock:
         _cache.clear()
     if os.path.isfile(CACHE_FILE):
-        try:
-            os.remove(CACHE_FILE)
-        except Exception:
-            pass
+        for _ in range(5):
+            try:
+                os.remove(CACHE_FILE)
+                break
+            except Exception:
+                time.sleep(0.1)
 
 def run_rclone(args, timeout=60):
     """Chạy rclone tương thích đa nền tảng (Windows & Linux)."""

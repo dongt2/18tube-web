@@ -10,12 +10,19 @@
     const state = {
         source: 'drive', // Mặc định Google Drive
         creators: [],
+        countries: [],
+        selectedCountry: 'all',
         selectedCreator: '',
+        creatorCache: {}, // Bộ nhớ đệm RAM trên trình duyệt: chuyển đổi giữa các Creator TỨC THÌ 0s
         mediaItems: [],
         filteredItems: [],
         mediaTypeFilter: 'all', // 'all', 'video', 'photo'
         searchQuery: '',
         density: 'compact',
+
+        // Pagination (60 items / page)
+        currentPage: 1,
+        pageSize: 60,
 
         // Theater Video Player
         currentVideoIndex: -1,
@@ -36,6 +43,8 @@
     const elements = {
         btnSrcLocal: document.getElementById('btn-src-local'),
         btnSrcDrive: document.getElementById('btn-src-drive'),
+        countrySelect: document.getElementById('country-select'),
+        countryRibbon: document.getElementById('country-ribbon'),
         creatorSelect: document.getElementById('creator-select'),
         creatorRibbon: document.getElementById('creator-ribbon'),
         gallerySearch: document.getElementById('gallery-search'),
@@ -84,6 +93,7 @@
         lbStage: document.getElementById('lb-stage'),
 
         toastContainer: document.getElementById('cinema-toast-container'),
+        galleryPagination: document.getElementById('gallery-pagination'),
     };
 
     // ==========================================
@@ -115,6 +125,26 @@
     // DATA FETCHING
     // ==========================================
 
+    function getCountryLabel(cName) {
+        if (!cName || cName.toLowerCase() === 'all' || cName === '__all__') return '🌍 Tất cả';
+        const lower = cName.toLowerCase();
+        if (lower.includes('việt') || lower.includes('viet') || lower === 'vn') return '🇻🇳 Việt Nam';
+        if (lower.includes('anh') || lower === 'uk' || lower === 'gb') return '🇬🇧 Anh';
+        if (lower.includes('úc') || lower.includes('uc') || lower.includes('australia') || lower === 'au') return '🇦🇺 Úc';
+        if (lower.includes('ba lan') || lower.includes('poland') || lower === 'pl') return '🇵🇱 Ba Lan';
+        if (lower.includes('indonesia') || lower === 'id') return '🇮🇩 Indonesia';
+        if (lower.includes('mỹ') || lower.includes('usa') || lower === 'us') return '🇺🇸 Mỹ';
+        if (lower.includes('nhật') || lower.includes('japan') || lower === 'jp') return '🇯🇵 Nhật Bản';
+        if (lower.includes('hàn') || lower.includes('korea') || lower === 'kr') return '🇰🇷 Hàn Quốc';
+        if (lower.includes('trung') || lower.includes('china') || lower === 'cn') return '🇨🇳 Trung Quốc';
+        if (lower.includes('thái') || lower.includes('thailand') || lower === 'th') return '🇹🇭 Thái Lan';
+        if (lower.includes('đài loan') || lower.includes('taiwan') || lower === 'tw') return '🇹🇼 Đài Loan';
+        if (lower.includes('malaysia') || lower === 'my') return '🇲🇾 Malaysia';
+        if (lower.includes('singapore') || lower === 'sg') return '🇸🇬 Singapore';
+        if (lower.includes('nga') || lower.includes('russia') || lower === 'ru') return '🇷🇺 Nga';
+        return '🌐 ' + cName;
+    }
+
     async function loadCreators() {
         elements.creatorSelect.innerHTML = '<option value="">Đang tải...</option>';
         try {
@@ -123,16 +153,38 @@
                 const data = await res.json();
                 if (data.success) {
                     state.creators = data.creators || [];
+                    state.countries = [{ name: 'Mặc định', count: state.creators.length }];
                 }
             } else {
-                const res = await fetch('/api/drive/summary_all');
+                // Tải nhanh danh sách creator và quốc gia từ backend
+                const res = await fetch('/api/drive/creators');
                 const data = await res.json();
-                if (data.success && data.data) {
-                    state.creators = data.data.creators || [];
+                if (data.success) {
+                    state.creators = data.creators || [];
+                    state.countries = data.countries || [];
                 }
+
+                // Gọi ngầm summary_all để bổ sung số lượng file trên badge mà không chặn UI
+                fetch('/api/drive/summary_all').then(r => r.json()).then(summaryRes => {
+                    if (summaryRes.success && summaryRes.data && summaryRes.data.creators) {
+                        const countMap = {};
+                        summaryRes.data.creators.forEach(sc => {
+                            countMap[sc.slug] = sc.total_files || (sc.photos_count + sc.videos_count) || 0;
+                            if (sc.name) countMap[sc.name] = countMap[sc.slug];
+                        });
+                        state.creators.forEach(c => {
+                            if (countMap[c.slug] !== undefined) c.total_files = countMap[c.slug];
+                            else if (countMap[c.name] !== undefined) c.total_files = countMap[c.name];
+                        });
+                        renderCountriesList();
+                        renderCreatorsList();
+                    }
+                }).catch(() => {});
             }
 
+            renderCountriesList();
             renderCreatorsList();
+
             if (state.creators.length > 0) {
                 const first = state.creators[0].slug || state.creators[0].name;
                 selectCreator(first);
@@ -149,25 +201,130 @@
         }
     }
 
-    function renderCreatorsList() {
-        // Dropdown
-        elements.creatorSelect.innerHTML = state.creators.map(c => {
-            const name = c.slug || c.name;
-            const total = c.total_files || (c.photos_count + c.videos_count) || 0;
-            return `<option value="${name}">${name} (${total})</option>`;
-        }).join('');
+    function renderCountriesList() {
+        if (!elements.countrySelect || !elements.countryRibbon) return;
 
-        // Ribbon
-        elements.creatorRibbon.innerHTML = state.creators.map(c => {
-            const name = c.slug || c.name;
-            const isActive = state.selectedCreator === name ? 'active' : '';
-            return `<span class="creator-chip ${isActive}" data-name="${name}">👤 ${name}</span>`;
+        const totalCreators = state.creators.length;
+
+        // 1. Dropdown Quốc gia
+        let selectHtml = `<option value="all">🌍 Tất cả Quốc Gia (${totalCreators})</option>`;
+        state.countries.forEach(c => {
+            const flag = c.flag ? `${c.flag} ` : '';
+            selectHtml += `<option value="${c.name}">${flag}${c.name} (${c.count})</option>`;
+        });
+        elements.countrySelect.innerHTML = selectHtml;
+        elements.countrySelect.value = state.selectedCountry;
+
+        // 2. Ribbon Quốc gia
+        let ribbonHtml = `
+            <span class="country-chip ${state.selectedCountry === 'all' ? 'active' : ''}" data-country="all">
+                🌍 Tất cả (${totalCreators})
+            </span>
+        `;
+        state.countries.forEach(c => {
+            const isActive = state.selectedCountry === c.name ? 'active' : '';
+            const flag = c.flag ? `${c.flag} ` : '';
+            ribbonHtml += `
+                <span class="country-chip ${isActive}" data-country="${c.name}">
+                    ${flag}${c.name} (${c.count})
+                </span>
+            `;
+        });
+        elements.countryRibbon.innerHTML = ribbonHtml;
+
+        elements.countryRibbon.querySelectorAll('.country-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const cName = chip.getAttribute('data-country');
+                selectCountry(cName);
+            });
+        });
+    }
+
+    function selectCountry(countryName) {
+        state.selectedCountry = countryName || 'all';
+        if (elements.countrySelect) elements.countrySelect.value = state.selectedCountry;
+
+        if (elements.countryRibbon) {
+            elements.countryRibbon.querySelectorAll('.country-chip').forEach(chip => {
+                chip.classList.toggle('active', chip.getAttribute('data-country') === state.selectedCountry);
+            });
+        }
+
+        renderCreatorsList();
+
+        // Tự động chọn creator đầu tiên của quốc gia mới chọn
+        const visibleCreators = (state.selectedCountry === 'all') 
+            ? state.creators 
+            : state.creators.filter(c => c.country === state.selectedCountry);
+
+        if (visibleCreators.length > 0) {
+            const isCurrentVisible = visibleCreators.some(c => (c.slug || c.name) === state.selectedCreator);
+            if (!isCurrentVisible && state.selectedCreator !== '__all__') {
+                const first = visibleCreators[0].slug || visibleCreators[0].name;
+                selectCreator(first);
+            }
+        }
+    }
+
+    function renderCreatorsList() {
+        const visibleCreators = (state.selectedCountry === 'all')
+            ? state.creators
+            : state.creators.filter(c => c.country === state.selectedCountry);
+
+        let totalVisibleFiles = 0;
+        visibleCreators.forEach(c => {
+            if (c.total_files) totalVisibleFiles += c.total_files;
+        });
+
+        const allCountStr = totalVisibleFiles > 0 ? ` (${totalVisibleFiles})` : '';
+        const allLabel = state.selectedCountry === 'all' ? '🌟 Tất cả Creator' : `🌟 Tất cả (${state.selectedCountry})`;
+        const allOption = `<option value="__all__">${allLabel}${allCountStr}</option>`;
+
+        // Dropdown Creator: Gom nhóm theo Quốc gia nếu ở chế độ Tất cả
+        if (state.selectedCountry === 'all' && state.countries.length > 1) {
+            let groupsHtml = allOption;
+            state.countries.forEach(cntry => {
+                const cCreators = state.creators.filter(c => c.country === cntry.name);
+                if (cCreators.length > 0) {
+                    groupsHtml += `<optgroup label="${getCountryLabel(cntry.name)} (${cCreators.length})">`;
+                    groupsHtml += cCreators.map(c => {
+                        const slug = c.slug || c.name;
+                        const dName = c.name || slug;
+                        const total = (c.total_files !== undefined && c.total_files !== null) ? ` (${c.total_files})` : '';
+                        return `<option value="${slug}">${dName}${total}</option>`;
+                    }).join('');
+                    groupsHtml += `</optgroup>`;
+                }
+            });
+            elements.creatorSelect.innerHTML = groupsHtml;
+        } else {
+            elements.creatorSelect.innerHTML = allOption + visibleCreators.map(c => {
+                const slug = c.slug || c.name;
+                const dName = c.name || slug;
+                const total = (c.total_files !== undefined && c.total_files !== null) ? ` (${c.total_files})` : '';
+                return `<option value="${slug}">${dName}${total}</option>`;
+            }).join('');
+        }
+
+        if (state.selectedCreator) {
+            elements.creatorSelect.value = state.selectedCreator;
+        }
+
+        // Ribbon Creator
+        const allChipActive = state.selectedCreator === '__all__' ? 'active' : '';
+        const allChip = `<span class="creator-chip ${allChipActive}" data-name="__all__">${allLabel}</span>`;
+        elements.creatorRibbon.innerHTML = allChip + visibleCreators.map(c => {
+            const slug = c.slug || c.name;
+            const dName = c.name || slug;
+            const isActive = state.selectedCreator === slug ? 'active' : '';
+            const cFlag = c.country && c.country !== 'Việt Nam' ? `[${c.country}] ` : '';
+            return `<span class="creator-chip ${isActive}" data-name="${slug}">👤 ${cFlag}${dName}</span>`;
         }).join('');
 
         elements.creatorRibbon.querySelectorAll('.creator-chip').forEach(chip => {
             chip.addEventListener('click', () => {
-                const name = chip.getAttribute('data-name');
-                selectCreator(name);
+                const slug = chip.getAttribute('data-name');
+                selectCreator(slug);
             });
         });
     }
@@ -175,36 +332,61 @@
     async function selectCreator(name) {
         if (!name) return;
         state.selectedCreator = name;
+        state.currentPage = 1;
         elements.creatorSelect.value = name;
 
-        // Update active chip
+        // Cập nhật trạng thái active trên thanh ribbon
         elements.creatorRibbon.querySelectorAll('.creator-chip').forEach(chip => {
             if (chip.getAttribute('data-name') === name) chip.classList.add('active');
             else chip.classList.remove('active');
         });
 
+        // 1. KIỂM TRA BỘ ĐỆM RAM TRÌNH DUYỆT: MỞ TỨC THÌ 0 GIÂY KHÔNG CẦN CHỜ MẠNG!
+        if (state.creatorCache[name] && (state.creatorCache[name].photos.length + state.creatorCache[name].videos.length > 0)) {
+            const cached = state.creatorCache[name];
+            processMediaItems(cached.photos, cached.videos);
+            return;
+        }
+
+        const label = name === '__all__' ? 'tất cả Creator' : name;
         elements.cinemaGrid.innerHTML = `
             <div class="cinema-loading">
                 <div class="cinema-spinner"></div>
-                <span>Đang tải kho ảnh & video của ${name}...</span>
+                <span>Đang nạp kho ảnh & video của ${label}...</span>
             </div>
         `;
 
         try {
+            let resData = null;
             if (state.source === 'local') {
                 const creatorObj = state.creators.find(c => (c.slug || c.name) === name);
                 const path = creatorObj ? creatorObj.path : '';
                 const res = await fetch(`/api/local/creator?path=${encodeURIComponent(path)}`);
                 const data = await res.json();
-                if (data.success && data.data) {
-                    processMediaItems(data.data.photos, data.data.videos);
-                }
+                if (data.success && data.data) resData = data.data;
             } else {
-                const res = await fetch(`/api/drive/creator/${name}`);
-                const data = await res.json();
-                if (data.success && data.data) {
-                    processMediaItems(data.data.photos, data.data.videos);
+                let apiUrl = '';
+                if (name === '__all__') {
+                    apiUrl = state.selectedCountry && state.selectedCountry !== 'all'
+                        ? `/api/drive/creator/all?country=${encodeURIComponent(state.selectedCountry)}`
+                        : '/api/drive/creator/all';
+                } else {
+                    apiUrl = `/api/drive/creator/${encodeURI(name)}`;
                 }
+                const res = await fetch(apiUrl);
+                const data = await res.json();
+                if (data.success && data.data) resData = data.data;
+            }
+
+            if (resData) {
+                // Chỉ lưu vào RAM trình duyệt nếu có dữ liệu để tránh lưu nhầm cache rỗng
+                if ((resData.photos && resData.photos.length > 0) || (resData.videos && resData.videos.length > 0)) {
+                    state.creatorCache[name] = {
+                        photos: resData.photos || [],
+                        videos: resData.videos || []
+                    };
+                }
+                processMediaItems(resData.photos, resData.videos);
             }
         } catch (err) {
             console.error('Error fetching creator media:', err);
@@ -221,6 +403,8 @@
                 id: 'photo_' + idx,
                 type: 'photo',
                 name: p.name,
+                creator: p.creator || '',
+                country: p.country || '',
                 size_str: p.size_str,
                 date: p.mod_time,
                 file_id: fId,
@@ -240,6 +424,8 @@
                 id: 'video_' + idx,
                 type: 'video',
                 name: v.name,
+                creator: v.creator || '',
+                country: v.country || '',
                 size_str: v.size_str,
                 date: v.mod_time,
                 file_id: fId,
@@ -266,6 +452,194 @@
     // GRID RENDERING
     // ==========================================
 
+    function renderCardHtml(it) {
+        const isVid = it.type === 'video';
+        const badgeClass = isVid ? 'badge-video' : 'badge-photo';
+        const badgeText = isVid ? '🎬 VIDEO' : '📸 ẢNH';
+        const thumbSrc = it.thumbnail_url || (it.file_id ? `https://lh3.googleusercontent.com/d/${it.file_id}=w500` : it.stream_url);
+        const fallbackSrc = it.file_id ? `/api/media/thumbnail?id=${it.file_id}&proxy=1` : '/static/placeholder.svg';
+
+        return `
+            <div class="media-card" data-id="${it.id}" data-type="${it.type}">
+                <div class="media-poster-box">
+                    <span class="media-type-badge ${badgeClass}">${badgeText}</span>
+                    <span class="media-size-badge">${it.size_str}</span>
+
+                    <img src="${thumbSrc}" 
+                         alt="${it.name}" 
+                         loading="lazy" 
+                         onerror="if(this.getAttribute('data-err')!=='1'){this.setAttribute('data-err','1');this.src='${fallbackSrc}';}else{this.src='/static/placeholder.svg';}">
+
+                    ${isVid ? `
+                        <div class="media-play-glow">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="media-meta-box">
+                    <span class="media-title" title="${it.name}">
+                        ${it.creator ? `<span class="creator-tag" style="color:#00f2fe;font-size:0.75rem;margin-right:5px;font-weight:600;">[${it.country && it.country !== 'Việt Nam' ? it.country + ' • ' : ''}${it.creator}]</span>` : ''}${it.name}
+                    </span>
+                    <div class="media-sub-meta">
+                        <span>${it.size_str}</span>
+                        <span>${it.date || ''}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderGridPage() {
+        const totalItems = state.filteredItems.length;
+        const totalPages = Math.ceil(totalItems / state.pageSize) || 1;
+
+        if (state.currentPage > totalPages) state.currentPage = totalPages;
+        if (state.currentPage < 1) state.currentPage = 1;
+
+        if (totalItems === 0) {
+            elements.cinemaGrid.innerHTML = `
+                <div class="cinema-empty">
+                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    <span>Không tìm thấy ảnh hoặc video nào phù hợp</span>
+                </div>
+            `;
+            elements.mediaStatusText.textContent = '0 tệp tin';
+            if (elements.galleryPagination) elements.galleryPagination.style.display = 'none';
+            return;
+        }
+
+        const startIndex = (state.currentPage - 1) * state.pageSize;
+        const endIndex = Math.min(startIndex + state.pageSize, totalItems);
+        const pageItems = state.filteredItems.slice(startIndex, endIndex);
+
+        // Hiển thị dải số tệp và số trang rõ ràng
+        elements.mediaStatusText.textContent = `Hiển thị ${startIndex + 1} - ${endIndex} / ${totalItems.toLocaleString('vi-VN')} tệp • Trang ${state.currentPage}/${totalPages} (60 tệp/trang)`;
+
+        const temp = document.createElement('div');
+        temp.innerHTML = pageItems.map(it => renderCardHtml(it)).join('');
+        const fragment = document.createDocumentFragment();
+        Array.from(temp.children).forEach(card => {
+            card.addEventListener('click', () => {
+                const id = card.getAttribute('data-id');
+                const type = card.getAttribute('data-type');
+                if (type === 'video') openTheaterVideoById(id);
+                else openPhotoLightboxById(id);
+            });
+            fragment.appendChild(card);
+        });
+
+        elements.cinemaGrid.innerHTML = '';
+        elements.cinemaGrid.appendChild(fragment);
+
+        renderPaginationControls(totalPages, totalItems);
+    }
+
+    function renderPaginationControls(totalPages, totalItems) {
+        if (!elements.galleryPagination) return;
+        if (totalPages <= 1) {
+            elements.galleryPagination.style.display = 'none';
+            return;
+        }
+
+        elements.galleryPagination.style.display = 'flex';
+        const cur = state.currentPage;
+
+        let html = '';
+
+        // Nút Trang Đầu & Nút Trước
+        html += `<button class="page-btn" data-page="1" ${cur === 1 ? 'disabled' : ''} title="Trang đầu">⏮ Đầu</button>`;
+        html += `<button class="page-btn" data-page="${cur - 1}" ${cur === 1 ? 'disabled' : ''} title="Trang trước">◀ Trước</button>`;
+
+        // Thuật toán hiển thị các nút số trang thông minh
+        const pages = [];
+        if (totalPages <= 9) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
+        } else {
+            pages.push(1);
+            let start = Math.max(2, cur - 2);
+            let end = Math.min(totalPages - 1, cur + 2);
+
+            if (cur <= 4) {
+                start = 2;
+                end = 6;
+            } else if (cur >= totalPages - 3) {
+                start = totalPages - 5;
+                end = totalPages - 1;
+            }
+
+            if (start > 2) pages.push('ellipsis');
+            for (let i = start; i <= end; i++) pages.push(i);
+            if (end < totalPages - 1) pages.push('ellipsis');
+            pages.push(totalPages);
+        }
+
+        // Render các nút số trang
+        pages.forEach(p => {
+            if (p === 'ellipsis') {
+                html += `<span class="page-ellipsis">…</span>`;
+            } else {
+                const isActive = p === cur ? 'active' : '';
+                html += `<button class="page-btn ${isActive}" data-page="${p}">${p}</button>`;
+            }
+        });
+
+        // Nút Sau & Nút Cuối
+        html += `<button class="page-btn" data-page="${cur + 1}" ${cur === totalPages ? 'disabled' : ''} title="Trang kế tiếp">Sau ▶</button>`;
+        html += `<button class="page-btn" data-page="${totalPages}" ${cur === totalPages ? 'disabled' : ''} title="Trang cuối">Cuối ⏭</button>`;
+
+        // Hộp Nhảy Trang Nhanh & Tóm tắt
+        html += `
+            <div class="page-info-box">
+                <span class="page-info-text">Trang <strong>${cur}</strong> / ${totalPages}</span>
+                <div class="page-jump-box">
+                    <input type="number" min="1" max="${totalPages}" value="${cur}" class="page-jump-input" id="page-jump-input" title="Nhập số trang">
+                    <button class="page-jump-btn" id="page-jump-btn">Đi</button>
+                </div>
+            </div>
+        `;
+
+        elements.galleryPagination.innerHTML = html;
+
+        // Gắn sự kiện click chuyển trang
+        elements.galleryPagination.querySelectorAll('.page-btn[data-page]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const p = parseInt(btn.getAttribute('data-page'), 10);
+                if (!isNaN(p)) goToPage(p);
+            });
+        });
+
+        const jumpInput = document.getElementById('page-jump-input');
+        const jumpBtn = document.getElementById('page-jump-btn');
+        if (jumpBtn && jumpInput) {
+            const doJump = () => {
+                const val = parseInt(jumpInput.value, 10);
+                if (!isNaN(val)) goToPage(val);
+            };
+            jumpBtn.addEventListener('click', doJump);
+            jumpInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') doJump();
+            });
+        }
+    }
+
+    function goToPage(page) {
+        const totalPages = Math.ceil(state.filteredItems.length / state.pageSize) || 1;
+        if (page < 1) page = 1;
+        if (page > totalPages) page = totalPages;
+        if (page === state.currentPage) return;
+
+        state.currentPage = page;
+        renderGridPage();
+
+        // Cuộn mượt lên đầu danh sách ảnh
+        const subbar = document.querySelector('.gallery-subbar');
+        if (subbar) {
+            subbar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }
+
     function filterAndRenderGrid() {
         let items = [...state.mediaItems];
 
@@ -279,69 +653,12 @@
         // Search
         const q = state.searchQuery.trim().toLowerCase();
         if (q) {
-            items = items.filter(it => it.name.toLowerCase().includes(q));
+            items = items.filter(it => it.name.toLowerCase().includes(q) || (it.creator && it.creator.toLowerCase().includes(q)) || (it.country && it.country.toLowerCase().includes(q)));
         }
 
         state.filteredItems = items;
-        elements.mediaStatusText.textContent = `${items.length} tệp tin hiển thị`;
-
-        if (items.length === 0) {
-            elements.cinemaGrid.innerHTML = `
-                <div class="cinema-empty">
-                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                    <span>Không tìm thấy ảnh hoặc video nào phù hợp</span>
-                </div>
-            `;
-            return;
-        }
-
-        elements.cinemaGrid.innerHTML = items.map(it => {
-            const isVid = it.type === 'video';
-            const badgeClass = isVid ? 'badge-video' : 'badge-photo';
-            const badgeText = isVid ? '🎬 VIDEO' : '📸 ẢNH';
-            const thumbSrc = it.thumbnail_url || (it.file_id ? `https://lh3.googleusercontent.com/d/${it.file_id}=w500` : it.stream_url);
-            const fallbackSrc = it.file_id ? `/api/media/thumbnail?id=${it.file_id}&proxy=1` : '/static/placeholder.svg';
-
-            return `
-                <div class="media-card" data-id="${it.id}" data-type="${it.type}">
-                    <div class="media-poster-box">
-                        <span class="media-type-badge ${badgeClass}">${badgeText}</span>
-                        <span class="media-size-badge">${it.size_str}</span>
-
-                        <img src="${thumbSrc}" 
-                             alt="${it.name}" 
-                             loading="lazy" 
-                             onerror="if(this.getAttribute('data-err')!=='1'){this.setAttribute('data-err','1');this.src='${fallbackSrc}';}else{this.src='/static/placeholder.svg';}">
-
-                        ${isVid ? `
-                            <div class="media-play-glow">
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
-                            </div>
-                        ` : ''}
-                    </div>
-                    <div class="media-meta-box">
-                        <span class="media-title" title="${it.name}">${it.name}</span>
-                        <div class="media-sub-meta">
-                            <span>${it.size_str}</span>
-                            <span>${it.date || ''}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        // Attach click listeners
-        elements.cinemaGrid.querySelectorAll('.media-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const id = card.getAttribute('data-id');
-                const type = card.getAttribute('data-type');
-                if (type === 'video') {
-                    openTheaterVideoById(id);
-                } else {
-                    openPhotoLightboxById(id);
-                }
-            });
-        });
+        state.currentPage = 1;
+        renderGridPage();
     }
 
     // ==========================================
@@ -640,6 +957,13 @@
                 elements.btnSrcDrive.classList.add('active');
                 if (elements.btnSrcLocal) elements.btnSrcLocal.classList.remove('active');
                 loadCreators();
+            });
+        }
+
+        // Country select dropdown
+        if (elements.countrySelect) {
+            elements.countrySelect.addEventListener('change', (e) => {
+                selectCountry(e.target.value);
             });
         }
 

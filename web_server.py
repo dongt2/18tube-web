@@ -14,6 +14,7 @@ import mimetypes
 import hashlib
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import requests
 from urllib.parse import unquote
 from flask import Flask, render_template, jsonify, request, send_file, abort, Response, redirect
@@ -33,11 +34,52 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 THUMBNAILS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".thumbnails")
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
-# Global in-memory cache for rclone results to keep web UI instant
+# Global persistent cache for rclone results to keep web UI instant
 # Structure: { cache_key: { "data": ..., "timestamp": float } }
-CACHE_TTL = 300  # 5 minutes
+CACHE_TTL = 3600  # 1 hour
+CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".drive_cache.json")
 _cache = {}
 _cache_lock = threading.Lock()
+_save_lock = threading.Lock()
+
+def _load_cache_from_disk():
+    global _cache
+    if os.path.isfile(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if not content:
+                return
+            try:
+                loaded = json.loads(content)
+            except json.JSONDecodeError as jde:
+                if jde.pos and jde.pos > 0:
+                    loaded = json.loads(content[:jde.pos])
+                else:
+                    raise
+            if isinstance(loaded, dict):
+                if "drive_creator_items_all" in loaded:
+                    del loaded["drive_creator_items_all"]
+                with _cache_lock:
+                    _cache = loaded
+        except Exception as e:
+            print(f"Lỗi nạp cache từ đĩa: {e}")
+
+def _save_cache_to_disk():
+    with _save_lock:
+        try:
+            with _cache_lock:
+                data_to_save = dict(_cache)
+            tmp_file = CACHE_FILE + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data_to_save, f, ensure_ascii=False)
+            if os.path.isfile(tmp_file):
+                os.replace(tmp_file, CACHE_FILE)
+        except Exception as e:
+            print(f"Lỗi khi lưu cache ra đĩa: {e}")
+
+# Khởi tạo nạp cache sẵn từ đĩa ngay khi server khởi động
+_load_cache_from_disk()
 
 DEFAULT_LOCAL_PATHS = [
     r"E:\New folder (3)",
@@ -47,8 +89,8 @@ DEFAULT_LOCAL_PATHS = [
 def get_cached(key):
     with _cache_lock:
         item = _cache.get(key)
-        if item and (time.time() - item["timestamp"]) < CACHE_TTL:
-            return item["data"]
+        if item and (time.time() - item.get("timestamp", 0)) < CACHE_TTL:
+            return item.get("data")
         return None
 
 def set_cached(key, data):
@@ -57,10 +99,17 @@ def set_cached(key, data):
             "data": data,
             "timestamp": time.time()
         }
+    # Lưu đệm ngầm ra đĩa (non-blocking)
+    threading.Thread(target=_save_cache_to_disk, daemon=True).start()
 
 def clear_cache():
     with _cache_lock:
         _cache.clear()
+    if os.path.isfile(CACHE_FILE):
+        try:
+            os.remove(CACHE_FILE)
+        except Exception:
+            pass
 
 def run_rclone(args, timeout=60):
     """Chạy rclone tương thích đa nền tảng (Windows & Linux)."""
@@ -100,6 +149,467 @@ def is_video_ext(filename):
     ext = os.path.splitext(filename)[1].lower()
     return ext in [".mp4", ".m4v", ".webm", ".ts", ".mkv", ".mov", ".avi"]
 
+def requests_quote(path_str):
+    import urllib.parse
+    return urllib.parse.quote(str(path_str))
+
+COUNTRY_CONFIG = {
+    "_Vietnam": {"name": "Việt Nam", "flag": "🇻🇳", "code": "VN"},
+    "_UK": {"name": "Anh", "flag": "🇬🇧", "code": "GB"},
+    "_USA": {"name": "Mỹ", "flag": "🇺🇸", "code": "US"},
+    "_Australia": {"name": "Úc", "flag": "🇦🇺", "code": "AU"},
+    "_Poland": {"name": "Ba Lan", "flag": "🇵🇱", "code": "PL"},
+    "_Indonesia": {"name": "Indonesia", "flag": "🇮🇩", "code": "ID"},
+    "_China": {"name": "Trung Quốc", "flag": "🇨🇳", "code": "CN"},
+    "_Japan": {"name": "Nhật Bản", "flag": "🇯🇵", "code": "JP"},
+    "_Korea": {"name": "Hàn Quốc", "flag": "🇰🇷", "code": "KR"},
+    "_Malaysia": {"name": "Malaysia", "flag": "🇲🇾", "code": "MY"},
+    "_Russia": {"name": "Nga", "flag": "🇷🇺", "code": "RU"},
+    "_Singapore": {"name": "Singapore", "flag": "🇸🇬", "code": "SG"},
+    "_Taiwan": {"name": "Đài Loan", "flag": "🇹🇼", "code": "TW"},
+    "_Thailand": {"name": "Thái Lan", "flag": "🇹🇭", "code": "TH"},
+}
+
+def get_country_info(folder_name):
+    if not folder_name:
+        return {"name": "Việt Nam", "flag": "🇻🇳", "code": "VN"}
+    f_clean = folder_name.strip()
+    if f_clean in COUNTRY_CONFIG:
+        return COUNTRY_CONFIG[f_clean]
+    with_ = "_" + f_clean.lstrip("_")
+    if with_ in COUNTRY_CONFIG:
+        return COUNTRY_CONFIG[with_]
+    for k, v in COUNTRY_CONFIG.items():
+        if v["name"].lower() == f_clean.lower() or v["code"].lower() == f_clean.lower():
+            return v
+    raw = f_clean.lstrip("_")
+    return {"name": raw, "flag": "🌐", "code": raw[:2].upper()}
+
+def build_all_drive_cache(force=False):
+    """
+    Quét toàn bộ Google Drive 1 lần duy nhất:
+    Tự động phân loại và nạp cache danh sách chi tiết (ảnh, video) của TẤT CẢ các creator
+    vào bộ nhớ RAM và lưu xuống .drive_cache.json.
+    Nhờ vậy, người dùng bấm vào bất kỳ Creator nào cũng mở ra TỨC THÌ (0ms).
+    """
+    if not force:
+        # Tối ưu siêu tốc (0.001s): Tổng hợp trực tiếp từ RAM cache các creator đã nạp
+        cached_creators = []
+        tot_files = 0
+        tot_bytes = 0
+        seen_slugs = set()
+        with _cache_lock:
+            for k, v in _cache.items():
+                if k.startswith("drive_creator_items_") and k != "drive_creator_items_all":
+                    c_data = v.get("data", {})
+                    if isinstance(c_data, dict):
+                        c_slug = c_data.get("slug", "")
+                        # Bỏ qua nếu là thư mục quốc gia gốc không có sub-creator (VD: _Vietnam, _UK)
+                        if not c_slug or (c_slug.startswith("_") and "/" not in c_slug):
+                            continue
+                        real_c_slug = c_slug if "/" in c_slug else f"_Vietnam/{c_slug}"
+                        if real_c_slug in seen_slugs:
+                            continue
+                        seen_slugs.add(real_c_slug)
+
+                        c_name = c_data.get("name") or real_c_slug.split("/")[-1]
+                        c_folder = real_c_slug.split("/")[0] if "/" in real_c_slug else "_Vietnam"
+                        c_info = get_country_info(c_folder)
+                        c_country = c_data.get("country") or c_info["name"]
+                        p_cnt = c_data.get("photos_count", 0)
+                        v_cnt = c_data.get("videos_count", 0)
+                        t_sz = c_data.get("total_size", 0)
+                        tot_files += (p_cnt + v_cnt)
+                        tot_bytes += t_sz
+                        cached_creators.append({
+                            "slug": real_c_slug,
+                            "name": c_name,
+                            "country": c_country,
+                            "country_flag": c_info["flag"],
+                            "photos_count": p_cnt,
+                            "videos_count": v_cnt,
+                            "total_files": p_cnt + v_cnt,
+                            "total_size": t_sz,
+                            "total_size_str": format_bytes(t_sz),
+                            "drive_url": f"https://drive.google.com/drive/folders/{c_data.get('id', '')}" if c_data.get('id') else ""
+                        })
+        if len(cached_creators) >= 10:
+            cached_creators.sort(key=lambda x: (x.get("country") != "Việt Nam", (x.get("country") or "").lower(), x["name"].lower()))
+            summary_res = {
+                "total_creators": len(cached_creators),
+                "total_files": tot_files,
+                "total_size": tot_bytes,
+                "total_size_str": format_bytes(tot_bytes),
+                "creators": cached_creators
+            }
+            set_cached("drive_summary_all", summary_res)
+            return summary_res
+
+        cached_summary = get_cached("drive_summary_all")
+        if cached_summary:
+            valid_creators = [c for c in cached_summary.get("creators", []) if not (c.get("slug", "").startswith("_") and "/" not in c.get("slug", ""))]
+            if len(valid_creators) == len(cached_summary.get("creators", [])):
+                return cached_summary
+
+    raw_json = run_rclone([
+        "lsjson", "gg:18TUBE", "--recursive", "--max-depth", "3",
+        "--fast-list", "--drive-pacer-min-sleep", "10ms"
+    ], timeout=60)
+    items = json.loads(raw_json)
+
+    creator_map = {}
+    creator_files_map = {}
+    total_cloud_bytes = 0
+    total_cloud_files = 0
+    all_photos = []
+    all_videos = []
+
+    for it in items:
+        path = it.get("Path", "")
+        parts = path.replace("\\", "/").split("/")
+        if not parts:
+            continue
+
+        if parts[0].startswith("_"):
+            # Thư mục quốc gia (VD: _Anh/katie hoặc _Úc/eskyperry)
+            if len(parts) < 2:
+                continue
+            country_name = parts[0].lstrip("_")
+            creator_name = parts[1]
+            creator_slug = f"{parts[0]}/{parts[1]}"
+        else:
+            country_name = "Việt Nam"
+            creator_name = parts[0]
+            creator_slug = parts[0]
+
+        if creator_slug not in creator_map:
+            creator_map[creator_slug] = {
+                "slug": creator_slug,
+                "name": creator_name,
+                "country": country_name,
+                "photos_count": 0,
+                "videos_count": 0,
+                "total_size": 0,
+                "id": "",
+                "mod_time": ""
+            }
+            creator_files_map[creator_slug] = {
+                "photos": [],
+                "videos": [],
+                "issues": [],
+                "total_size": 0
+            }
+
+        if it.get("IsDir"):
+            is_creator_dir = (len(parts) == 2 if parts[0].startswith("_") else len(parts) == 1)
+            if is_creator_dir:
+                creator_map[creator_slug]["id"] = it.get("ID", "")
+                creator_map[creator_slug]["mod_time"] = it.get("ModTime", "")
+            continue
+
+        size = it.get("Size", 0)
+        fname = it.get("Name", "")
+        f_id = it.get("ID", "")
+        mod_time = it.get("ModTime", "")
+
+        creator_map[creator_slug]["total_size"] += size
+        creator_files_map[creator_slug]["total_size"] += size
+        total_cloud_bytes += size
+        total_cloud_files += 1
+
+        file_info = {
+            "name": fname,
+            "path": path,
+            "size": size,
+            "size_str": format_bytes(size),
+            "mod_time": mod_time,
+            "id": f_id,
+            "creator": creator_name,
+            "country": country_name,
+            "drive_view_url": f"https://drive.google.com/file/d/{f_id}/view" if f_id else "",
+            "drive_preview_url": f"https://drive.google.com/file/d/{f_id}/preview" if f_id else "",
+            "thumbnail_url": f"https://lh3.googleusercontent.com/d/{f_id}=w500" if f_id else "",
+            "stream_url": f"/api/media/drive/stream?id={f_id}&name={requests_quote(fname)}" if f_id else "",
+            "drive_download_url": f"https://drive.google.com/uc?export=download&id={f_id}" if f_id else "",
+            "is_empty": size <= 0
+        }
+
+        if size <= 0:
+            creator_files_map[creator_slug]["issues"].append({
+                **file_info,
+                "issue_type": "0_byte",
+                "issue_desc": "File 0 bytes (tải lên bị lỗi/rỗng)"
+            })
+
+        if is_image_ext(fname):
+            creator_map[creator_slug]["photos_count"] += 1
+            creator_files_map[creator_slug]["photos"].append(file_info)
+            all_photos.append(file_info)
+        elif is_video_ext(fname):
+            if 0 < size < 50 * 1024:
+                creator_files_map[creator_slug]["issues"].append({
+                    **file_info,
+                    "issue_type": "suspicious_small_video",
+                    "issue_desc": "Video quá nhỏ (<50KB), có thể bị lỗi stream dở dang"
+                })
+            creator_map[creator_slug]["videos_count"] += 1
+            creator_files_map[creator_slug]["videos"].append(file_info)
+            all_videos.append(file_info)
+
+    # 1. Nạp chi tiết cho TỪNG creator vào cache (bấm là ra ngay 0s)
+    for c_slug, c_data in creator_files_map.items():
+        set_cached(f"drive_creator_items_{c_slug}", {
+            "slug": c_slug,
+            "name": creator_map[c_slug]["name"],
+            "country": creator_map[c_slug]["country"],
+            "total_items": len(c_data["photos"]) + len(c_data["videos"]),
+            "photos_count": len(c_data["photos"]),
+            "videos_count": len(c_data["videos"]),
+            "issues_count": len(c_data["issues"]),
+            "total_size": c_data["total_size"],
+            "total_size_str": format_bytes(c_data["total_size"]),
+            "photos": c_data["photos"],
+            "videos": c_data["videos"],
+            "issues": c_data["issues"]
+        })
+
+    # 2. Nạp mục tổng hợp "all" cho trường hợp chọn "Tất cả Creator"
+    set_cached("drive_creator_items_all", {
+        "slug": "all",
+        "name": "Tất cả Creator",
+        "total_items": len(all_photos) + len(all_videos),
+        "photos_count": len(all_photos),
+        "videos_count": len(all_videos),
+        "issues_count": 0,
+        "total_size": total_cloud_bytes,
+        "total_size_str": format_bytes(total_cloud_bytes),
+        "photos": all_photos,
+        "videos": all_videos,
+        "issues": []
+    })
+
+    creators_list = []
+    for c, val in creator_map.items():
+        val["total_files"] = val["photos_count"] + val["videos_count"]
+        val["total_size_str"] = format_bytes(val["total_size"])
+        val["drive_url"] = f"https://drive.google.com/drive/folders/{val['id']}" if val.get("id") else ""
+        creators_list.append(val)
+
+    creators_list.sort(key=lambda x: x["slug"].lower())
+
+    summary_result = {
+        "total_creators": len(creators_list),
+        "total_files": total_cloud_files,
+        "total_size": total_cloud_bytes,
+        "total_size_str": format_bytes(total_cloud_bytes),
+        "creators": creators_list
+    }
+
+    set_cached("drive_summary_all", summary_result)
+    set_cached("drive_creators_list", creators_list)
+    return summary_result
+
+def _background_prefetch_creators():
+    """Luồng quét ngầm từng creator một cách an toàn và bền bỉ (không bao giờ timeout)."""
+    try:
+        creators = get_cached("drive_creators_list") or []
+        for c in creators:
+            c_slug = c.get("slug")
+            if not c_slug or (c_slug.startswith("_") and "/" not in c_slug):
+                continue
+            key = f"drive_creator_items_{c_slug}"
+            alt_key = f"drive_creator_items_{c_slug.split('/')[-1]}"
+            if not get_cached(key) and not get_cached(alt_key):
+                try:
+                    raw_json = run_rclone([
+                        "lsjson", f"gg:18TUBE/{c_slug}", "--recursive",
+                        "--fast-list", "--drive-pacer-min-sleep", "10ms"
+                    ], timeout=40)
+                    items = json.loads(raw_json)
+                    c_name = c.get("name") or c_slug.split("/")[-1]
+                    c_folder = c_slug.split("/")[0] if "/" in c_slug else "_Vietnam"
+                    c_info = get_country_info(c_folder)
+                    c_country = c.get("country") or c_info["name"]
+                    photos = []
+                    videos = []
+                    issues = []
+                    total_size = 0
+                    for it in items:
+                        if it.get("IsDir"): continue
+                        fname = it.get("Name", "")
+                        path = it.get("Path", "")
+                        sz = it.get("Size", 0)
+                        total_size += sz
+                        f_id = it.get("ID", "")
+                        mod_time = it.get("ModTime", "")
+                        finfo = {
+                            "name": fname,
+                            "path": path,
+                            "size": sz,
+                            "size_str": format_bytes(sz),
+                            "mod_time": mod_time,
+                            "id": f_id,
+                            "creator": c_name,
+                            "country": c_country,
+                            "drive_view_url": f"https://drive.google.com/file/d/{f_id}/view" if f_id else "",
+                            "drive_preview_url": f"https://drive.google.com/file/d/{f_id}/preview" if f_id else "",
+                            "thumbnail_url": f"https://lh3.googleusercontent.com/d/{f_id}=w500" if f_id else "",
+                            "stream_url": f"/api/media/drive/stream?id={f_id}&name={requests_quote(fname)}" if f_id else "",
+                            "drive_download_url": f"https://drive.google.com/uc?export=download&id={f_id}" if f_id else "",
+                            "is_empty": sz <= 0
+                        }
+                        if is_image_ext(fname): photos.append(finfo)
+                        elif is_video_ext(fname): videos.append(finfo)
+                    payload = {
+                        "slug": c_slug,
+                        "name": c_name,
+                        "country": c_country,
+                        "total_items": len(photos) + len(videos),
+                        "photos_count": len(photos),
+                        "videos_count": len(videos),
+                        "issues_count": len(issues),
+                        "total_size": total_size,
+                        "total_size_str": format_bytes(total_size),
+                        "photos": photos,
+                        "videos": videos,
+                        "issues": issues
+                    }
+                    set_cached(key, payload)
+                    set_cached(alt_key, payload)
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+def get_drive_creators_hierarchy(force=False):
+    """
+    Quét danh sách creator trên Google Drive theo cấu trúc thư mục mới:
+    - gg:18TUBE/_<CountryName>/<CreatorName>
+    - Tự động bóc tách tên quốc gia tiếng Việt, cờ emoji, và creator con.
+    """
+    cache_key = "drive_creators_list_v3"
+    if not force:
+        cached = get_cached(cache_key)
+        if cached and isinstance(cached, dict):
+            return cached.get("creators", []), cached.get("countries", [])
+
+    # Quét thư mục gốc gg:18TUBE
+    raw_json = run_rclone(["lsjson", "gg:18TUBE", "--max-depth", "1", "--drive-pacer-min-sleep", "10ms"], timeout=15)
+    items = json.loads(raw_json)
+    
+    country_folders = []
+    root_creators = []
+    
+    for it in items:
+        if not it.get("IsDir"):
+            continue
+        name = it.get("Name", "")
+        if name.startswith("_"):
+            country_folders.append(it)
+        else:
+            root_creators.append(it)
+    
+    creators = []
+    
+    # 1. Thêm các creator ở thư mục gốc (nếu có, mặc định: Việt Nam)
+    for it in root_creators:
+        name = it.get("Name", "")
+        c_id = it.get("ID", "")
+        mod_time = it.get("ModTime", "")
+        creators.append({
+            "slug": name,
+            "name": name,
+            "country": "Việt Nam",
+            "country_code": "VN",
+            "country_flag": "🇻🇳",
+            "country_folder": "",
+            "id": c_id,
+            "drive_url": f"https://drive.google.com/drive/folders/{c_id}" if c_id else "",
+            "mod_time": mod_time
+        })
+        
+    # 2. Quét các thư mục quốc gia (bắt đầu bằng _)
+    if country_folders:
+        def scan_country(cf):
+            c_dir_name = cf.get("Name", "")
+            c_info = get_country_info(c_dir_name)
+            try:
+                c_raw = run_rclone(["lsjson", f"gg:18TUBE/{c_dir_name}", "--max-depth", "1", "--drive-pacer-min-sleep", "10ms"], timeout=15)
+                sub_items = json.loads(c_raw)
+                sub_creators = []
+                for sit in sub_items:
+                    if sit.get("IsDir"):
+                        sname = sit.get("Name", "")
+                        sid = sit.get("ID", "")
+                        smod = sit.get("ModTime", "")
+                        sub_creators.append({
+                            "slug": f"{c_dir_name}/{sname}",
+                            "name": sname,
+                            "country": c_info["name"],
+                            "country_code": c_info["code"],
+                            "country_flag": c_info["flag"],
+                            "country_folder": c_dir_name,
+                            "id": sid,
+                            "drive_url": f"https://drive.google.com/drive/folders/{sid}" if sid else "",
+                            "mod_time": smod
+                        })
+                return sub_creators
+            except Exception as ce:
+                print(f"Lỗi khi quét quốc gia {c_dir_name}: {ce}")
+                return []
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            country_results = executor.map(scan_country, country_folders)
+            for c_res in country_results:
+                creators.extend(c_res)
+
+    # 3. Thống kê danh sách Quốc gia
+    country_counts = {}
+    for c in creators:
+        cntry = c.get("country", "Khác")
+        country_counts[cntry] = country_counts.get(cntry, 0) + 1
+
+    countries = []
+    if "Việt Nam" in country_counts:
+        countries.append({
+            "name": "Việt Nam",
+            "code": "_Vietnam",
+            "flag": "🇻🇳",
+            "count": country_counts.pop("Việt Nam")
+        })
+    for c_name in sorted(country_counts.keys()):
+        matched_folder = next((f for f, info in COUNTRY_CONFIG.items() if info["name"] == c_name), f"_{c_name}")
+        c_info = get_country_info(matched_folder)
+        countries.append({
+            "name": c_name,
+            "code": matched_folder,
+            "flag": c_info["flag"],
+            "count": country_counts[c_name]
+        })
+
+    creators.sort(key=lambda x: (x["country"] != "Việt Nam", x["country"].lower(), x["name"].lower()))
+    
+    result_payload = {
+        "creators": creators,
+        "countries": countries
+    }
+    set_cached(cache_key, result_payload)
+    set_cached("drive_creators_list", creators)
+    return creators, countries
+
+def _warmup_cache():
+    """Tự động nạp sẵn danh sách creator & toàn bộ file trong nền khi server khởi chạy (0s chờ)."""
+    time.sleep(1)
+    try:
+        get_drive_creators_hierarchy(force=False)
+        threading.Thread(target=_background_prefetch_creators, daemon=True).start()
+    except Exception:
+        pass
+
+# Kích hoạt tiến trình nạp cache ngầm
+threading.Thread(target=_warmup_cache, daemon=True).start()
+
 # ----------------- ROUTES: WEB PAGES -----------------
 
 @app.route("/")
@@ -134,69 +644,96 @@ def api_drive_info():
 
 @app.route("/api/drive/creators")
 def api_drive_creators():
-    """Lấy danh sách các thư mục creator trên Google Drive (gg:18TUBE)."""
+    """Lấy danh sách các thư mục creator trên Google Drive (gg:18TUBE), hỗ trợ phân cấp Quốc Gia -> Creator."""
     try:
         force = request.args.get("refresh", "0") == "1"
-        cache_key = "drive_creators_list"
-        
-        if not force:
-            cached = get_cached(cache_key)
-            if cached:
-                return jsonify({"success": True, "creators": cached, "cached": True})
-
-        # Quét thư mục gốc gg:18TUBE
-        raw_json = run_rclone(["lsjson", "gg:18TUBE", "--max-depth", "1"], timeout=15)
-        items = json.loads(raw_json)
-        
-        creators = []
-        for it in items:
-            if it.get("IsDir"):
-                name = it.get("Name", "")
-                c_id = it.get("ID", "")
-                mod_time = it.get("ModTime", "")
-                creators.append({
-                    "slug": name,
-                    "name": name,
-                    "id": c_id,
-                    "drive_url": f"https://drive.google.com/drive/folders/{c_id}" if c_id else "",
-                    "mod_time": mod_time
-                })
-        
-        # Sắp xếp creator theo tên A-Z
-        creators.sort(key=lambda x: x["name"].lower())
-        set_cached(cache_key, creators)
-        return jsonify({"success": True, "creators": creators, "cached": False})
+        creators, countries = get_drive_creators_hierarchy(force=force)
+        return jsonify({"success": True, "creators": creators, "countries": countries, "cached": not force})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-@app.route("/api/drive/creator/<slug>")
+@app.route("/api/drive/creator/<path:slug>")
 def api_drive_creator_detail(slug):
     """
     Quét chi tiết tất cả file trong thư mục creator trên Google Drive.
-    Phân loại ảnh, video, phát hiện file hỏng/0-byte, link xem trực tiếp trên Drive.
+    Hỗ trợ đường dẫn creator thông thường hoặc _QuốcGia/creator.
     """
     try:
-        slug = re.sub(r"[^a-zA-Z0-9_\-\.]", "", slug)
-        if not slug:
+        slug = slug.strip().strip("/")
+        if not slug or ".." in slug:
             return jsonify({"success": False, "error": "Tên creator không hợp lệ"}), 400
 
         force = request.args.get("refresh", "0") == "1"
-        cache_key = f"drive_creator_items_{slug}"
+
+        # 1. HỖ TRỢ CHẾ ĐỘ "ALL" (TẤT CẢ CREATOR): Tự động tổng hợp từ tất cả Creator đang có trong cache
+        if slug.lower() == "all":
+            all_photos = []
+            all_videos = []
+            country_filter = request.args.get("country", "").strip()
+
+            with _cache_lock:
+                for k, v in _cache.items():
+                    if k.startswith("drive_creator_items_") and k != "drive_creator_items_all":
+                        c_data = v.get("data", {})
+                        if isinstance(c_data, dict):
+                            c_country = c_data.get("country", "Việt Nam")
+                            if country_filter and country_filter.lower() not in ["all", "__all__"]:
+                                if c_country.lower() != country_filter.lower():
+                                    continue
+                            all_photos.extend(c_data.get("photos", []))
+                            all_videos.extend(c_data.get("videos", []))
+
+            total_items = len(all_photos) + len(all_videos)
+            total_size = sum(x.get("size", 0) for x in all_photos + all_videos)
+            result_data = {
+                "slug": "all",
+                "name": "Tất cả Creator" if not country_filter else f"Tất cả ({country_filter})",
+                "country": country_filter if country_filter else "all",
+                "total_items": total_items,
+                "photos_count": len(all_photos),
+                "videos_count": len(all_videos),
+                "issues_count": 0,
+                "total_size": total_size,
+                "total_size_str": format_bytes(total_size),
+                "photos": all_photos,
+                "videos": all_videos,
+                "issues": []
+            }
+            return jsonify({"success": True, "data": result_data, "cached": True})
+
+        # Tự động chuẩn hóa slug: tìm kiếm trong danh sách creator hiện có
+        real_slug = slug
+        c_list = get_cached("drive_creators_list") or []
+        matched_c = next((c for c in c_list if c.get("slug") == slug or c.get("name") == slug), None)
+        if matched_c:
+            real_slug = matched_c.get("slug", slug)
+
+        cache_key = f"drive_creator_items_{real_slug}"
+        alt_key1 = f"drive_creator_items_{slug}"
+        alt_key2 = f"drive_creator_items_{slug.split('/')[-1]}"
 
         if not force:
-            cached = get_cached(cache_key)
-            if cached:
+            cached = get_cached(cache_key) or get_cached(alt_key1) or get_cached(alt_key2)
+            if cached and cached.get("total_items", 0) > 0:
+                if matched_c:
+                    cached["slug"] = matched_c.get("slug", cached.get("slug"))
+                    cached["country"] = matched_c.get("country", cached.get("country"))
                 return jsonify({"success": True, "data": cached, "cached": True})
 
-        # Quét đệ quy rclone
+        # Quét đệ quy rclone với --fast-list và pacer 10ms tối ưu truy vấn Drive
         try:
-            raw_json = run_rclone(["lsjson", f"gg:18TUBE/{slug}", "--recursive"], timeout=45)
+            raw_json = run_rclone(["lsjson", f"gg:18TUBE/{real_slug}", "--recursive", "--fast-list", "--drive-pacer-min-sleep", "10ms"], timeout=45)
             items = json.loads(raw_json)
         except Exception as rc_err:
             if "directory not found" in str(rc_err).lower():
                 items = []
             else:
                 raise
+
+        creator_name = real_slug.split("/")[-1]
+        c_folder = real_slug.split("/")[0] if "/" in real_slug else "_Vietnam"
+        c_info = get_country_info(c_folder)
+        creator_country = c_info["name"]
 
         photos = []
         videos = []
@@ -221,6 +758,8 @@ def api_drive_creator_detail(slug):
                 "size_str": format_bytes(size),
                 "mod_time": mod_time,
                 "id": f_id,
+                "creator": creator_name,
+                "country": creator_country,
                 "drive_view_url": f"https://drive.google.com/file/d/{f_id}/view" if f_id else "",
                 "drive_preview_url": f"https://drive.google.com/file/d/{f_id}/preview" if f_id else "",
                 "thumbnail_url": f"https://lh3.googleusercontent.com/d/{f_id}=w500" if f_id else "",
@@ -248,12 +787,11 @@ def api_drive_creator_detail(slug):
                         "issue_desc": "Video quá nhỏ (<50KB), có thể bị lỗi stream dở dang"
                     })
                 videos.append(file_info)
-            else:
-                # File định dạng khác
-                pass
 
         result_data = {
-            "slug": slug,
+            "slug": real_slug,
+            "name": creator_name,
+            "country": creator_country,
             "total_items": len(photos) + len(videos),
             "photos_count": len(photos),
             "videos_count": len(videos),
@@ -266,83 +804,19 @@ def api_drive_creator_detail(slug):
         }
 
         set_cached(cache_key, result_data)
+        set_cached(alt_key1, result_data)
+        set_cached(alt_key2, result_data)
         return jsonify({"success": True, "data": result_data, "cached": False})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route("/api/drive/summary_all")
 def api_drive_summary_all():
-    """Lấy thống kê nhanh tổng hợp tất cả creator trên Drive."""
+    """Lấy thống kê nhanh tổng hợp tất cả creator trên Drive (và nạp sẵn toàn bộ creator)."""
     try:
         force = request.args.get("refresh", "0") == "1"
-        cache_key = "drive_summary_all"
-        
-        if not force:
-            cached = get_cached(cache_key)
-            if cached:
-                return jsonify({"success": True, "data": cached, "cached": True})
-
-        # Quét nhanh 2 cấp để lấy toàn bộ file trên gg:18TUBE
-        raw_json = run_rclone(["lsjson", "gg:18TUBE", "--recursive", "--max-depth", "3"], timeout=60)
-        items = json.loads(raw_json)
-
-        creator_map = {}
-        total_cloud_bytes = 0
-        total_cloud_files = 0
-
-        for it in items:
-            path = it.get("Path", "")
-            parts = path.replace("\\", "/").split("/")
-            creator_name = parts[0] if parts else ""
-            if not creator_name:
-                continue
-
-            if creator_name not in creator_map:
-                creator_map[creator_name] = {
-                    "slug": creator_name,
-                    "photos_count": 0,
-                    "videos_count": 0,
-                    "total_size": 0,
-                    "id": "",
-                    "mod_time": ""
-                }
-
-            if it.get("IsDir"):
-                if len(parts) == 1:
-                    creator_map[creator_name]["id"] = it.get("ID", "")
-                    creator_map[creator_name]["mod_time"] = it.get("ModTime", "")
-                continue
-
-            size = it.get("Size", 0)
-            creator_map[creator_name]["total_size"] += size
-            total_cloud_bytes += size
-            total_cloud_files += 1
-
-            fname = it.get("Name", "")
-            if is_image_ext(fname):
-                creator_map[creator_name]["photos_count"] += 1
-            elif is_video_ext(fname):
-                creator_map[creator_name]["videos_count"] += 1
-
-        creators_list = []
-        for c, val in creator_map.items():
-            val["total_files"] = val["photos_count"] + val["videos_count"]
-            val["total_size_str"] = format_bytes(val["total_size"])
-            val["drive_url"] = f"https://drive.google.com/drive/folders/{val['id']}" if val.get("id") else ""
-            creators_list.append(val)
-
-        creators_list.sort(key=lambda x: x["slug"].lower())
-
-        result = {
-            "total_creators": len(creators_list),
-            "total_files": total_cloud_files,
-            "total_size": total_cloud_bytes,
-            "total_size_str": format_bytes(total_cloud_bytes),
-            "creators": creators_list
-        }
-
-        set_cached(cache_key, result)
-        return jsonify({"success": True, "data": result, "cached": False})
+        data = build_all_drive_cache(force=force)
+        return jsonify({"success": True, "data": data, "cached": not force})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -616,7 +1090,7 @@ def api_media_drive_stream():
             response_headers["Content-Disposition"] = "inline"
 
         def generate():
-            for chunk in resp.iter_content(chunk_size=128 * 1024):
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
                 if chunk:
                     yield chunk
 
@@ -643,14 +1117,14 @@ def api_media_thumbnail():
 
         cache_file = os.path.join(THUMBNAILS_DIR, f"drive_{file_id}.jpg")
         if os.path.isfile(cache_file) and os.path.getsize(cache_file) > 0:
-            return send_file(cache_file, mimetype="image/jpeg")
+            return send_file(cache_file, mimetype="image/jpeg", max_age=86400)
 
         try:
             resp = requests.get(drive_cdn_url, timeout=8)
             if resp.status_code == 200 and len(resp.content) > 0:
                 with open(cache_file, "wb") as f:
                     f.write(resp.content)
-                return send_file(cache_file, mimetype="image/jpeg")
+                return send_file(cache_file, mimetype="image/jpeg", max_age=86400)
         except Exception:
             pass
 
@@ -660,7 +1134,7 @@ def api_media_thumbnail():
             if resp2.status_code == 200 and len(resp2.content) > 0:
                 with open(cache_file, "wb") as f:
                     f.write(resp2.content)
-                return send_file(cache_file, mimetype="image/jpeg")
+                return send_file(cache_file, mimetype="image/jpeg", max_age=86400)
         except Exception:
             pass
 
@@ -747,13 +1221,19 @@ def api_verify_creator():
         issues = []
 
         if source_type == "drive":
-            storage_location = f"Google Drive (gg:18TUBE/{slug})"
-            cache_key = f"drive_creator_items_{slug}"
-            data = get_cached(cache_key)
+            real_slug = slug
+            c_list = get_cached("drive_creators_list") or []
+            matched_c = next((c for c in c_list if c.get("slug") == slug or c.get("name") == slug), None)
+            if matched_c:
+                real_slug = matched_c.get("slug", slug)
+
+            storage_location = f"Google Drive (gg:18TUBE/{real_slug})"
+            cache_key = f"drive_creator_items_{real_slug}"
+            data = get_cached(cache_key) or get_cached(f"drive_creator_items_{slug}")
             if not data:
                 try:
-                    # Quét nhanh rclone
-                    raw_json = run_rclone(["lsjson", f"gg:18TUBE/{slug}", "--recursive"], timeout=30)
+                    # Quét nhanh rclone với --fast-list và pacer 10ms
+                    raw_json = run_rclone(["lsjson", f"gg:18TUBE/{real_slug}", "--recursive", "--fast-list", "--drive-pacer-min-sleep", "10ms"], timeout=30)
                     items = json.loads(raw_json)
                 except Exception:
                     items = []

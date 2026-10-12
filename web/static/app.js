@@ -237,6 +237,27 @@
         }
     }
 
+    async function loadDriveQuickCreators() {
+        try {
+            const res = await fetch('/api/drive/creators');
+            const data = await res.json();
+            if (data.success && data.creators && data.creators.length > 0) {
+                if (!state.driveSummary) {
+                    state.driveCreators = data.creators;
+                    elements.mCreatorsCount.textContent = data.creators.length;
+                    elements.overviewBadge.textContent = `${data.creators.length} Creator`;
+                    elements.tabDriveCount.textContent = data.creators.length;
+                    elements.driveSidebarCount.textContent = data.creators.length;
+                    renderDriveSidebar(data.creators);
+                    renderVerifyChips(data.creators);
+                    renderOverviewCards(data.creators);
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching quick creators:', err);
+        }
+    }
+
     async function loadDriveSummary(refresh = false) {
         try {
             const res = await fetch(`/api/drive/summary_all?refresh=${refresh ? '1' : '0'}`);
@@ -278,7 +299,7 @@
 
     function renderOverviewCards(creators) {
         const query = elements.overviewSearch.value.trim().toLowerCase();
-        const filtered = creators.filter(c => c.slug.toLowerCase().includes(query));
+        const filtered = creators.filter(c => c.slug.toLowerCase().includes(query) || (c.country && c.country.toLowerCase().includes(query)));
 
         if (filtered.length === 0) {
             elements.overviewGrid.innerHTML = `
@@ -290,13 +311,17 @@
         }
 
         elements.overviewGrid.innerHTML = filtered.map(c => {
-            const initial = c.slug.charAt(0).toUpperCase();
+            const initial = (c.name || c.slug).charAt(0).toUpperCase();
+            const flag = c.country_flag || (c.country === 'Việt Nam' ? '🇻🇳' : '🌐');
+            const countryBadge = (c.country && c.country !== 'Việt Nam') 
+                ? `<span style="color:#00f2fe;font-size:0.75rem;margin-right:4px;">${flag} [${c.country}]</span>` 
+                : `<span style="opacity:0.7;font-size:0.75rem;margin-right:4px;">${flag}</span>`;
             return `
                 <div class="creator-card" data-slug="${c.slug}">
                     <div class="creator-card-header">
                         <div class="creator-avatar-box">${initial}</div>
                         <div class="creator-info">
-                            <h4 class="creator-title">${c.slug}</h4>
+                            <h4 class="creator-title">${countryBadge}${c.name || c.slug}</h4>
                             <span class="creator-time">${formatDate(c.mod_time)}</span>
                         </div>
                     </div>
@@ -334,19 +359,22 @@
     }
 
     function switchToDriveTabAndSelect(slug) {
+        state.selectedDriveCreator = slug;
         document.getElementById('nav-tab-drive').click();
         selectDriveCreator(slug);
     }
 
     function renderDriveSidebar(creators) {
         const query = (elements.driveCreatorFilter.value || '').trim().toLowerCase();
-        const filtered = creators.filter(c => c.slug.toLowerCase().includes(query));
+        const filtered = creators.filter(c => c.slug.toLowerCase().includes(query) || (c.country && c.country.toLowerCase().includes(query)));
 
         elements.driveNavList.innerHTML = filtered.map(c => {
             const isActive = state.selectedDriveCreator === c.slug ? 'active' : '';
+            const flag = c.country_flag || (c.country === 'Việt Nam' ? '🇻🇳' : '🌐');
+            const cFlag = (c.country && c.country !== 'Việt Nam') ? `${flag} [${c.country}] ` : `${flag} `;
             return `
                 <li class="creator-nav-item ${isActive}" data-slug="${c.slug}">
-                    <span>👤 ${c.slug}</span>
+                    <span>${cFlag}${c.name || c.slug}</span>
                     <span class="count-pill">${c.total_files || 0}</span>
                 </li>
             `;
@@ -371,13 +399,16 @@
         });
 
         // Cập nhật Hero Banner
-        elements.driveHeroName.textContent = slug;
-        elements.driveHeroAvatar.textContent = slug.charAt(0).toUpperCase();
+        const creatorObj = (state.driveCreators || []).find(c => c.slug === slug);
+        const displayName = creatorObj ? (creatorObj.country && creatorObj.country !== 'Việt Nam' ? `[${creatorObj.country}] ${creatorObj.name || slug}` : (creatorObj.name || slug)) : slug;
+        const initial = (creatorObj?.name || slug.split('/').pop() || slug).charAt(0).toUpperCase();
+        elements.driveHeroName.textContent = displayName;
+        elements.driveHeroAvatar.textContent = initial;
         elements.driveHeroSub.textContent = `Đang quét dữ liệu chi tiết từ gg:18TUBE/${slug}...`;
         elements.driveFilesGrid.innerHTML = `
             <div class="loading-state">
                 <div class="spinner"></div>
-                <span>Đang quét danh sách file trên Google Drive (${slug})...</span>
+                <span>Đang quét danh sách file trên Google Drive (${displayName})...</span>
             </div>
         `;
 
@@ -397,6 +428,9 @@
     }
 
     function renderDriveCreatorDetails(data) {
+        const creatorName = data.name || (data.slug ? data.slug.split('/').pop() : '');
+        const displayHero = (data.country && data.country !== 'Việt Nam' ? `[${data.country}] ` : '') + creatorName;
+        elements.driveHeroName.textContent = displayHero;
         elements.driveHeroSub.textContent = `Tổng cộng ${data.total_items} tệp tin media đã được bảo toàn`;
         elements.driveStatPhotos.textContent = data.photos_count || 0;
         elements.driveStatVideos.textContent = data.videos_count || 0;
@@ -1067,12 +1101,15 @@
         initModals();
         initEventListeners();
 
-        // Tải dữ liệu ban đầu song song
+        // 1. Tải nhanh thông tin Drive, Creator list (1-2s) và Local creators song song
         await Promise.all([
             loadDriveInfo(),
-            loadDriveSummary(),
+            loadDriveQuickCreators(),
             loadLocalCreators()
         ]);
+
+        // 2. Chạy tổng hợp số liệu toàn bộ Drive ngầm trong background (không chặn UI)
+        loadDriveSummary();
     }
 
     // Run on DOM ready

@@ -39,8 +39,15 @@
                         <span>Google Drive</span>
                     </div>
 
+                    <div class="country-dropdown-wrap">
+                        <label for="country-select">🌍 Quốc gia:</label>
+                        <select id="country-select" class="creator-select-box">
+                            <option value="all">🌍 Tất cả</option>
+                        </select>
+                    </div>
+
                     <div class="creator-dropdown-wrap">
-                        <label for="creator-select">Creator:</label>
+                        <label for="creator-select">👤 Creator:</label>
                         <select id="creator-select" class="creator-select-box">
                             <option value="">Đang tải danh sách...</option>
                         </select>
@@ -87,6 +94,11 @@
                     </button>
                 </div>
 
+                <!-- COUNTRY CHIPS LIST -->
+                <div class="country-ribbon" id="country-ribbon">
+                    <!-- Populated dynamically -->
+                </div>
+
                 <!-- CREATOR CHIPS LIST -->
                 <div class="creator-ribbon" id="creator-ribbon">
                     <!-- Populated dynamically -->
@@ -116,6 +128,9 @@
                     <span>Đang nạp kho ảnh và video...</span>
                 </div>
             </div>
+
+            <!-- PAGINATION CONTROLS -->
+            <div class="gallery-pagination" id="gallery-pagination" style="display: none;"></div>
         </main>
     </div>
 
@@ -228,6 +243,6 @@
 
     <!-- Video.js Script -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-    <script src="/static/gallery.js"></script>
+    <script src="/static/gallery.js?v=5"></script>
 </body>
 </html>

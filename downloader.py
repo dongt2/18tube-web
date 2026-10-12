@@ -15,8 +15,10 @@ import re
 import time
 import argparse
 import subprocess
+import shutil
 import requests
 import urllib.request
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
@@ -113,10 +115,10 @@ def extract_creator_slug(url):
     clean = url.strip()
     m = re.search(r"18tube\.nl/([^/?#]+)", clean)
     if m:
-        return m.group(1)
+        return m.group(1).lstrip("@")
     parts = [p for p in clean.replace("\\", "/").split("/") if p]
     if parts:
-        return parts[-1]
+        return parts[-1].lstrip("@")
     return "unknown"
 
 def fetch_creator_metadata(creator_slug):
@@ -405,31 +407,302 @@ def download_photo(item, out_dir, session, progress_callback=None, cancel_check=
 
     return False, filepath, "failed"
 
-def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=None, cancel_check=None):
-    """
-    Tải 1 video HLS m3u8 bằng ffmpeg với cơ chế tách luồng Video & Audio độc lập,
-    tự động bỏ qua và cô lập các stream bị lỗi 404 trên CDN 18tube.
-    """
-    key = item["key"]
-    url = item["url"]
-    filename = f"{key}.mp4"
-    filepath = os.path.join(out_dir, filename)
+def is_playlist_masked(playlist_text):
+    """Kiểm tra xem playlist HLS có chứa các segment bị ngụy trang bằng file ảnh hay không."""
+    if not playlist_text:
+        return False
+    lines = [l.strip() for l in playlist_text.splitlines() if l.strip() and not l.startswith('#')]
+    if lines:
+        first_line = lines[0].lower()
+        if any(ext in first_line for ext in ['.jpeg', '.jpg', '.png', '.webp', '.gif', 'icon']):
+            return True
+    return False
 
-    if os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
-        return True, filepath, "already_exists"
+def strip_segment_padding(data: bytes) -> bytes:
+    """
+    Loại bỏ header hình ảnh ngụy trang (JPEG, PNG, WebP) được chèn vào đầu segment MPEG-TS.
+    """
+    if not data:
+        return data
 
+    # 1. Trường hợp ngụy trang bằng ảnh JPEG: bắt đầu bằng \xff\xd8
+    if data.startswith(b'\xff\xd8'):
+        eoi = data.find(b'\xff\xd9')
+        if eoi != -1 and eoi < 4096:
+            candidate = data[eoi + 2:]
+            sync_pos = candidate.find(b'\x47')
+            if sync_pos != -1 and sync_pos < 64:
+                return candidate[sync_pos:]
+            return candidate
+
+    # 2. Trường hợp ngụy trang bằng PNG: bắt đầu bằng \x89PNG
+    if data.startswith(b'\x89PNG'):
+        iend = data.find(b'IEND')
+        if iend != -1 and iend < 4096:
+            candidate = data[iend + 8:]
+            sync_pos = candidate.find(b'\x47')
+            if sync_pos != -1 and sync_pos < 64:
+                return candidate[sync_pos:]
+            return candidate
+
+    # 3. Trường hợp ngụy trang bằng WebP/RIFF
+    if data.startswith(b'RIFF') and b'WEBP' in data[:16]:
+        sync_pos = data.find(b'\x47')
+        if sync_pos != -1 and sync_pos < 4096:
+            return data[sync_pos:]
+
+    # 4. Kiểm tra tổng quát: nếu không bắt đầu bằng sync byte 0x47 nhưng có 0x47 gần đầu
+    if not data.startswith(b'\x47') and not data.startswith(b'\x00\x00\x00') and b'\x47' in data[:4096]:
+        sync_pos = data.find(b'\x47')
+        if sync_pos != -1:
+            return data[sync_pos:]
+
+    return data
+
+def download_masked_hls(playlist_url, filepath, ffmpeg_exe, session=None, progress_callback=None, cancel_check=None):
+    """
+    Tải và ghép các segment HLS bị ngụy trang (steganography / masked JPEG/PNG):
+    - Tải song song đa luồng các segment với cơ chế tự động thử lại (auto-retry).
+    - Tách bỏ hoàn toàn lớp vỏ ngụy trang ảnh để lấy dòng MPEG-TS gốc.
+    - Ghép nối tuần tự chính xác và chuyển đổi sang container MP4 chất lượng gốc qua FFmpeg.
+    """
+    if not session:
+        session = create_optimized_session(8)
+
+    try:
+        req = urllib.request.Request(playlist_url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            playlist_text = resp.read().decode('utf-8', errors='ignore')
+    except Exception as e:
+        return False, str(e)
+
+    lines = [l.strip() for l in playlist_text.splitlines() if l.strip() and not l.startswith('#')]
+    if not lines:
+        return False, "no_segments"
+
+    seg_urls = [urllib.parse.urljoin(playlist_url, l) for l in lines]
+    total_segs = len(seg_urls)
+
+    durations = [float(d) for d in re.findall(r"#EXTINF:([0-9.]+),", playlist_text)]
+    total_dur = sum(durations) if durations else None
+
+    temp_dir = filepath + "_temp_segs"
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_ts = filepath + "_temp.ts"
+
+    total_downloaded = 0
+    completed_segs = 0
+    last_time = time.time()
+    last_bytes = 0
+
+    def dl_seg(idx, seg_url):
+        if cancel_check and cancel_check():
+            return None
+        for retry in range(3):
+            if cancel_check and cancel_check():
+                return None
+            try:
+                r = session.get(seg_url, timeout=20)
+                if r.status_code == 200 and len(r.content) > 0:
+                    clean = strip_segment_padding(r.content)
+                    part_path = os.path.join(temp_dir, f"seg_{idx:05d}.ts")
+                    with open(part_path, "wb") as f:
+                        f.write(clean)
+                    return idx, len(clean)
+            except Exception:
+                time.sleep(1)
+        return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futs = {executor.submit(dl_seg, i, u): i for i, u in enumerate(seg_urls)}
+            for f in as_completed(futs):
+                if cancel_check and cancel_check():
+                    break
+                res = f.result()
+                if res:
+                    idx, size = res
+                    completed_segs += 1
+                    total_downloaded += size
+                    now = time.time()
+                    dt = now - last_time
+                    if dt >= 0.2 and progress_callback:
+                        speed = (total_downloaded - last_bytes) / dt if dt > 0 else 0.0
+                        last_time = now
+                        last_bytes = total_downloaded
+                        pct = int((completed_segs / total_segs) * 95)
+                        est_tot = int((total_downloaded / completed_segs) * total_segs) if completed_segs > 0 else 0
+                        progress_callback(total_downloaded, est_tot, speed, pct)
+
+        if cancel_check and cancel_check():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return False, "cancelled"
+
+        if completed_segs < total_segs:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return False, "incomplete_segments"
+
+        # Ghép nối các file TS theo đúng thứ tự
+        with open(temp_ts, "wb") as out_ts:
+            for idx in range(total_segs):
+                p_file = os.path.join(temp_dir, f"seg_{idx:05d}.ts")
+                if os.path.exists(p_file):
+                    with open(p_file, "rb") as in_f:
+                        shutil.copyfileobj(in_f, out_ts)
+
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        # Chuyển đổi và đóng gói sang MP4 chất lượng gốc bằng FFmpeg
+        cmd = [
+            ffmpeg_exe,
+            "-i", temp_ts,
+            "-c", "copy",
+            "-bsf:a", "aac_adtstoasc",
+            "-y",
+            filepath
+        ]
+        p = subprocess.run(cmd, capture_output=True, text=True, **SUBPROCESS_EXTRA)
+        if os.path.exists(temp_ts):
+            try: os.remove(temp_ts)
+            except OSError: pass
+
+        if p.returncode == 0 and os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
+            if progress_callback:
+                sz = os.path.getsize(filepath)
+                progress_callback(sz, sz, 0, 100)
+            return True, "downloaded"
+        else:
+            if os.path.exists(filepath):
+                try: os.remove(filepath)
+                except OSError: pass
+            return False, "ffmpeg_error"
+
+    except Exception as e:
+        if os.path.exists(filepath):
+            try: os.remove(filepath)
+            except OSError: pass
+        return False, str(e)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(temp_ts):
+            try: os.remove(temp_ts)
+            except OSError: pass
+
+def inspect_and_resolve_video_streams(url, quality="best"):
+    """
+    Phân tích master playlist HLS:
+    - Nếu là Direct Media Playlist (chứa segment m4s/ts trực tiếp hoặc segment ngụy trang ảnh): tải trực tiếp từ url này.
+    - Nếu là Multivariant Playlist: phân tích các luồng phân giải và audio độc lập,
+      chọn luồng tốt nhất không bị lỗi 404 trên CDN.
+    Trả về: (vid_url, aud_url, total_duration, is_masked)
+    """
     base_url = url.rsplit("/", 1)[0]
-    
-    # 1. Tìm phân giải video thực tế có sẵn trên server (bỏ qua các stream 404)
-    chosen_res = resolve_best_video_stream(base_url, quality)
-    vid_url = f"{base_url}/{chosen_res}/"
-    aud_url = f"{base_url}/audio/"
+    master_text = None
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            master_text = resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        pass
 
-    total_duration = get_hls_duration(vid_url) or get_hls_duration(url)
+    # Nếu không tải được master_text, fallback theo logic cũ
+    if not master_text:
+        chosen_res = resolve_best_video_stream(base_url, quality)
+        vid_url = f"{base_url}/{chosen_res}/" if chosen_res else url
+        aud_url = f"{base_url}/audio/"
+        total_dur = get_hls_duration(vid_url) or get_hls_duration(url)
+        return vid_url, aud_url, total_dur, False
 
-    # 2. Xây dựng lệnh ffmpeg ghép nối trực tiếp Video + Audio
-    # Tránh nạp master playlist bị lỗi của server
-    header_arg = f"Referer: https://18tube.nl/\r\nUser-Agent: {HEADERS['User-Agent']}\r\n"
+    # Direct Media Playlist (như Slo / callmeslooo, hoặc Ain Nguyen / ainnguyen)
+    if "#EXT-X-STREAM-INF" not in master_text:
+        durations = [float(d) for d in re.findall(r"#EXTINF:([0-9.]+),", master_text)]
+        total_dur = sum(durations) if durations else None
+        masked = is_playlist_masked(master_text)
+        return url, None, total_dur, masked
+
+    # Multivariant Playlist (như bow_than, vyvanle, ...)
+    aud_url = None
+    m_aud = re.search(r'#EXT-X-MEDIA:TYPE=AUDIO.*?URI="([^"]+)"', master_text)
+    if m_aud:
+        cand_aud = urllib.parse.urljoin(url, m_aud.group(1))
+        try:
+            req_aud = urllib.request.Request(cand_aud, headers=HEADERS)
+            with urllib.request.urlopen(req_aud, timeout=5) as r_aud:
+                if r_aud.status == 200:
+                    aud_url = cand_aud
+        except Exception:
+            aud_url = None
+
+    lines = [l.strip() for l in master_text.splitlines() if l.strip()]
+    variants = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("#EXT-X-STREAM-INF:"):
+            res_match = re.search(r'RESOLUTION=(\d+)x(\d+)', line)
+            height = int(res_match.group(2)) if res_match else 0
+            bw_match = re.search(r'BANDWIDTH=(\d+)', line)
+            bw = int(bw_match.group(1)) if bw_match else 0
+            if i + 1 < len(lines) and not lines[i+1].startswith("#"):
+                v_cand = urllib.parse.urljoin(url, lines[i+1])
+                variants.append({"height": height, "bandwidth": bw, "url": v_cand})
+                i += 1
+        i += 1
+
+    if not variants:
+        chosen_res = resolve_best_video_stream(base_url, quality)
+        vid_url = f"{base_url}/{chosen_res}/" if chosen_res else url
+        total_dur = get_hls_duration(vid_url) or get_hls_duration(url)
+        return vid_url, aud_url, total_dur, False
+
+    if "360" in quality:
+        variants.sort(key=lambda x: abs(x["height"] - 360) if x["height"] > 0 else 9999)
+    elif "480" in quality:
+        variants.sort(key=lambda x: abs(x["height"] - 480) if x["height"] > 0 else 9999)
+    elif "lowest" in quality:
+        variants.sort(key=lambda x: (x["height"], x["bandwidth"]))
+    else:
+        # 720p hoặc best: chất lượng cao nhất trước
+        variants.sort(key=lambda x: (x["height"], x["bandwidth"]), reverse=True)
+
+    chosen_vid = None
+    masked = False
+    for cand in variants:
+        v_cand = cand["url"]
+        try:
+            req_v = urllib.request.Request(v_cand, headers=HEADERS)
+            with urllib.request.urlopen(req_v, timeout=5) as r_v:
+                txt = r_v.read().decode("utf-8", errors="ignore")
+            m_init = re.search(r'#EXT-X-MAP:URI="([^"]+)"', txt)
+            if m_init:
+                init_cand = urllib.parse.urljoin(v_cand, m_init.group(1))
+                req_i = urllib.request.Request(init_cand, headers=HEADERS)
+                with urllib.request.urlopen(req_i, timeout=5) as r_i:
+                    if r_i.status == 200:
+                        chosen_vid = v_cand
+                        masked = is_playlist_masked(txt)
+                        break
+            else:
+                seg_lines = [l.strip() for l in txt.splitlines() if l.strip() and not l.startswith("#")]
+                if seg_lines:
+                    seg_cand = urllib.parse.urljoin(v_cand, seg_lines[0])
+                    req_s = urllib.request.Request(seg_cand, headers=HEADERS)
+                    with urllib.request.urlopen(req_s, timeout=5) as r_s:
+                        if r_s.status == 200:
+                            chosen_vid = v_cand
+                            masked = is_playlist_masked(txt)
+                            break
+        except Exception:
+            continue
+
+    if not chosen_vid:
+        chosen_vid = variants[0]["url"]
+
+    total_dur = get_hls_duration(chosen_vid) or get_hls_duration(url)
+    return chosen_vid, aud_url, total_dur, masked
+
+def build_ffmpeg_cmd(ffmpeg_exe, vid_url, aud_url, filepath, header_arg):
+    """Tạo danh sách đối số dòng lệnh cho ffmpeg với hỗ trợ tách luồng hoặc đơn luồng."""
     cmd = [
         ffmpeg_exe,
         "-headers", header_arg,
@@ -441,25 +714,33 @@ def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=
         "-analyzeduration", "1000000",
         "-f", "hls",
         "-i", vid_url,
-        "-headers", header_arg,
-        "-http_persistent", "1",
-        "-reconnect", "1",
-        "-reconnect_streamed", "1",
-        "-reconnect_delay_max", "5",
-        "-probesize", "1000000",
-        "-analyzeduration", "1000000",
-        "-f", "hls",
-        "-i", aud_url,
-        "-map", "0:v:0",
-        "-map", "1:a:0",
+    ]
+    if aud_url:
+        cmd.extend([
+            "-headers", header_arg,
+            "-http_persistent", "1",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-probesize", "1000000",
+            "-analyzeduration", "1000000",
+            "-f", "hls",
+            "-i", aud_url,
+            "-map", "0:v:0?",
+            "-map", "1:a:0?",
+        ])
+    cmd.extend([
         "-c", "copy",
         "-bsf:a", "aac_adtstoasc",
         "-progress", "pipe:1",
         "-nostats",
         "-y",
         filepath
-    ]
+    ])
+    return cmd
 
+def _execute_ffmpeg_proc(cmd, filepath, total_duration=None, progress_callback=None, cancel_check=None):
+    """Thực thi tiến trình ffmpeg và cập nhật tiến độ."""
     try:
         proc = subprocess.Popen(
             cmd,
@@ -512,24 +793,93 @@ def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=
             if os.path.exists(filepath):
                 try: os.remove(filepath)
                 except OSError: pass
-            return False, filepath, "cancelled"
+            return False, "cancelled"
 
         if proc.returncode == 0 and os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
             if progress_callback:
                 final_sz = os.path.getsize(filepath)
                 progress_callback(final_sz, final_sz, 0, 100)
-            return True, filepath, "downloaded"
+            return True, "downloaded"
         else:
             if os.path.exists(filepath):
                 try: os.remove(filepath)
                 except OSError: pass
-            return False, filepath, "ffmpeg_error"
+            return False, "ffmpeg_error"
 
     except Exception as e:
         if os.path.exists(filepath):
             try: os.remove(filepath)
             except OSError: pass
-        return False, filepath, str(e)
+        return False, str(e)
+
+def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=None, cancel_check=None):
+    """
+    Tải 1 video HLS m3u8 bằng ffmpeg với cơ chế thích ứng tự động:
+    - Nếu là Masked HLS Stream (như Ain Nguyen): giải mã và tải trực tiếp các segment ngụy trang.
+    - Nếu là Direct Media Playlist (như Slo / callmeslooo): tải trực tiếp luồng thống nhất.
+    - Nếu là Multivariant Playlist: tự động chọn độ phân giải tốt nhất, loại bỏ luồng 404 CDN,
+      và đồng bộ luồng Video/Audio độc lập.
+    - Tự động fallback đa tầng nếu gặp sự cố phân giải.
+    """
+    key = item["key"]
+    url = item["url"]
+    filename = f"{key}.mp4"
+    filepath = os.path.join(out_dir, filename)
+
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
+        return True, filepath, "already_exists"
+
+    header_arg = f"Referer: https://18tube.nl/\r\nUser-Agent: {HEADERS['User-Agent']}\r\n"
+
+    # Phân tích cấu trúc stream
+    resolved = inspect_and_resolve_video_streams(url, quality)
+    if len(resolved) == 4:
+        vid_url, aud_url, total_dur, is_masked = resolved
+    else:
+        vid_url, aud_url, total_dur = resolved
+        is_masked = False
+
+    # Lần thử 1: Nếu phát hiện stream ngụy trang bằng ảnh (như Ain Nguyen)
+    if is_masked:
+        ok_mask, status_mask = download_masked_hls(
+            vid_url, filepath, ffmpeg_exe,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check
+        )
+        if ok_mask or status_mask == "cancelled":
+            return ok_mask, filepath, status_mask
+
+    # Lần thử 2: Chạy tiêu chuẩn bằng FFmpeg
+    cmd = build_ffmpeg_cmd(ffmpeg_exe, vid_url, aud_url, filepath, header_arg)
+    ok, status = _execute_ffmpeg_proc(cmd, filepath, total_dur, progress_callback, cancel_check)
+    if ok or status == "cancelled":
+        return ok, filepath, status
+
+    # Lần thử 3: Nếu có aud_url mà lỗi, thử chỉ vid_url
+    if aud_url and not (cancel_check and cancel_check()):
+        cmd2 = build_ffmpeg_cmd(ffmpeg_exe, vid_url, None, filepath, header_arg)
+        ok2, status2 = _execute_ffmpeg_proc(cmd2, filepath, total_dur, progress_callback, cancel_check)
+        if ok2 or status2 == "cancelled":
+            return ok2, filepath, status2
+
+    # Lần thử 4: Fallback trực tiếp bằng url gốc với -f hls
+    if vid_url != url and not (cancel_check and cancel_check()):
+        cmd3 = build_ffmpeg_cmd(ffmpeg_exe, url, None, filepath, header_arg)
+        ok3, status3 = _execute_ffmpeg_proc(cmd3, filepath, total_dur, progress_callback, cancel_check)
+        if ok3 or status3 == "cancelled":
+            return ok3, filepath, status3
+
+    # Lần thử 5: Cứu cánh cuối cùng - Thử giải mã segment trực tiếp bằng download_masked_hls
+    if not is_masked and not (cancel_check and cancel_check()):
+        ok_last, status_last = download_masked_hls(
+            vid_url, filepath, ffmpeg_exe,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check
+        )
+        if ok_last or status_last == "cancelled":
+            return ok_last, filepath, status_last
+
+    return False, filepath, status
 
 def get_rclone_path():
     """Tìm đường dẫn rclone trong bundle PyInstaller, thư mục bin/ cục bộ hoặc PATH hệ thống."""

@@ -13,6 +13,8 @@ import re
 import mimetypes
 import hashlib
 import gzip
+import zlib
+import sqlite3
 import shutil
 import subprocess
 import threading
@@ -38,120 +40,28 @@ os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
 # Global persistent cache for rclone results to keep web UI instant
 # Structure: { cache_key: { "data": ..., "timestamp": float } }
-CACHE_TTL = 3600  # 1 hour
-CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".drive_cache.json")
-CACHE_GZ_FILE = CACHE_FILE + ".gz"
-_cache = {}
-_cache_lock = threading.Lock()
-_save_lock = threading.Lock()
-_save_timer = None
-_save_timer_lock = threading.Lock()
+# SQLite persistent compressed cache for instant web UI and minimal RAM (< 40MB)
+CACHE_TTL = 86400 * 30  # Persistent 30 days
+DB_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".drive_cache.db")
+_db_lock = threading.Lock()
+_db_conn = None
 
-def _cleanup_stale_tmp_files():
-    """Dọn dẹp các file cache tạm cũ do tiến trình trước để lại."""
-    try:
-        cache_dir = os.path.dirname(os.path.abspath(CACHE_FILE))
-        prefix = os.path.basename(CACHE_FILE)
-        for fname in os.listdir(cache_dir):
-            if fname.startswith(prefix) and ".tmp" in fname:
-                try:
-                    os.remove(os.path.join(cache_dir, fname))
-                except OSError:
-                    pass
-    except Exception:
-        pass
+def _get_db():
+    global _db_conn
+    with _db_lock:
+        if _db_conn is None:
+            _db_conn = sqlite3.connect(DB_CACHE_FILE, timeout=30.0, check_same_thread=False)
+            _db_conn.execute("PRAGMA journal_mode=WAL;")
+            _db_conn.execute("PRAGMA synchronous=NORMAL;")
+            _db_conn.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value BLOB, timestamp REAL)")
+            _db_conn.commit()
+        return _db_conn
 
-def _load_cache_from_disk():
-    global _cache
-    _cleanup_stale_tmp_files()
-    raw_content = None
-    if os.path.isfile(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                raw_content = f.read().strip()
-        except Exception as e:
-            print(f"Lỗi nạp cache từ đĩa {CACHE_FILE}: {e}")
-    elif os.path.isfile(CACHE_GZ_FILE):
-        try:
-            with gzip.open(CACHE_GZ_FILE, "rt", encoding="utf-8") as f:
-                raw_content = f.read().strip()
-            print(f"[*] Đã nạp thành công bộ nhớ đệm Drive nén từ: {CACHE_GZ_FILE}")
-        except Exception as e:
-            print(f"Lỗi nạp cache nén {CACHE_GZ_FILE}: {e}")
-
-    if raw_content:
-        try:
-            loaded = json.loads(raw_content)
-            if isinstance(loaded, dict):
-                if "drive_creator_items_all" in loaded:
-                    del loaded["drive_creator_items_all"]
-                with _cache_lock:
-                    _cache = loaded
-                print(f"[OK] Đã nạp sẵn {len(_cache)} mục dữ liệu Google Drive vào RAM!")
-        except Exception as e:
-            print(f"Lỗi phân tích JSON cache: {e}")
-
-def _save_cache_to_disk():
-    """Ghi cache RAM ra đĩa an toàn đa tiến trình, retry xử lý xung đột Windows File Lock."""
-    with _save_lock:
-        tmp_file = None
-        try:
-            with _cache_lock:
-                data_to_save = dict(_cache)
-
-            # Đặt tên file tạm duy nhất theo PID + Thread ID + Timestamp để không bao giờ bị đụng độ file
-            pid = os.getpid()
-            tid = threading.get_ident()
-            timestamp = int(time.time() * 1000)
-            tmp_file = f"{CACHE_FILE}.tmp.{pid}.{tid}.{timestamp}"
-
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(data_to_save, f, ensure_ascii=False)
-
-            # Trên Windows, os.replace có thể tạm thời gặp WinError 32 nếu file đang bị scanner/đọc mở.
-            # Retry tối đa 10 lần với thời gian chờ tăng dần.
-            success = False
-            last_err = None
-            for attempt in range(10):
-                try:
-                    os.replace(tmp_file, CACHE_FILE)
-                    success = True
-                    break
-                except (PermissionError, OSError) as pe:
-                    last_err = pe
-                    time.sleep(0.15 * (attempt + 1))
-
-            if not success:
-                # Phương án dự phòng: thử sao chép đè nếu replace không thành công
-                try:
-                    shutil.copyfile(tmp_file, CACHE_FILE)
-                    success = True
-                except Exception as ce:
-                    print(f"Cảnh báo: File cache đang bị tiến trình khác truy cập, sẽ tự động lưu lại ở lần tiếp theo: {last_err or ce}")
-        except Exception as e:
-            print(f"Lỗi khi lưu cache ra đĩa: {e}")
-        finally:
-            if tmp_file and os.path.isfile(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except OSError:
-                    pass
-
-def _trigger_save_cache_debounced(delay=1.5):
-    """Debounce ghi cache: gom nhiều lần set_cached liên tiếp thành 1 lần ghi ra đĩa duy nhất."""
-    global _save_timer
-    with _save_timer_lock:
-        if _save_timer is not None:
-            try:
-                _save_timer.cancel()
-            except Exception:
-                pass
-        _save_timer = threading.Timer(delay, _save_cache_to_disk)
-        _save_timer.daemon = True
-        _save_timer.start()
-
-# Khởi tạo nạp cache sẵn từ đĩa ngay khi server khởi động
-_load_cache_from_disk()
+# Khởi tạo kết nối SQLite trên tiến trình chính
+try:
+    _get_db()
+except Exception as _e:
+    print(f"Lỗi khởi tạo SQLite cache: {_e}")
 
 DEFAULT_LOCAL_PATHS = [
     r"E:\New folder (3)",
@@ -159,39 +69,46 @@ DEFAULT_LOCAL_PATHS = [
 ]
 
 def get_cached(key):
-    with _cache_lock:
-        item = _cache.get(key)
-        if item and (time.time() - item.get("timestamp", 0)) < CACHE_TTL:
-            return item.get("data")
+    try:
+        conn = _get_db()
+        with _db_lock:
+            cur = conn.cursor()
+            cur.execute("SELECT value, timestamp FROM cache WHERE key = ?", (key,))
+            row = cur.fetchone()
+        if not row:
+            return None
+        val_bytes, ts = row
+        if (time.time() - ts) > CACHE_TTL:
+            return None
+        raw_str = zlib.decompress(val_bytes).decode("utf-8")
+        item = json.loads(raw_str)
+        if isinstance(item, dict) and "data" in item:
+            return item["data"]
+        return item
+    except Exception:
         return None
 
 def set_cached(key, data):
-    with _cache_lock:
-        _cache[key] = {
-            "data": data,
-            "timestamp": time.time()
-        }
-    # Gom cụm lưu đĩa ngầm (debounced) tránh nghẽn I/O và xung đột file
-    _trigger_save_cache_debounced(delay=1.5)
+    try:
+        raw_str = json.dumps({"data": data, "timestamp": time.time()}, separators=(',', ':'), ensure_ascii=False).encode("utf-8")
+        comp_bytes = zlib.compress(raw_str, level=6)
+        conn = _get_db()
+        with _db_lock:
+            cur = conn.cursor()
+            cur.execute("INSERT OR REPLACE INTO cache VALUES (?, ?, ?)", (key, comp_bytes, time.time()))
+            conn.commit()
+    except Exception as e:
+        print(f"Lỗi lưu cache vào SQLite: {e}")
 
 def clear_cache():
-    global _save_timer
-    with _save_timer_lock:
-        if _save_timer is not None:
-            try:
-                _save_timer.cancel()
-            except Exception:
-                pass
-            _save_timer = None
-    with _cache_lock:
-        _cache.clear()
-    if os.path.isfile(CACHE_FILE):
-        for _ in range(5):
-            try:
-                os.remove(CACHE_FILE)
-                break
-            except Exception:
-                time.sleep(0.1)
+    try:
+        conn = _get_db()
+        with _db_lock:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM cache")
+            conn.commit()
+    except Exception:
+        pass
 
 def run_rclone(args, timeout=60):
     """Chạy rclone tương thích đa nền tảng (Windows & Linux)."""
@@ -275,63 +192,69 @@ def build_all_drive_cache(force=False):
     Nhờ vậy, người dùng bấm vào bất kỳ Creator nào cũng mở ra TỨC THÌ (0ms).
     """
     if not force:
-        # Tối ưu siêu tốc (0.001s): Tổng hợp trực tiếp từ RAM cache các creator đã nạp
-        cached_creators = []
-        tot_files = 0
-        tot_bytes = 0
-        seen_slugs = set()
-        with _cache_lock:
-            for k, v in _cache.items():
-                if k.startswith("drive_creator_items_") and k != "drive_creator_items_all":
-                    c_data = v.get("data", {})
-                    if isinstance(c_data, dict):
-                        c_slug = c_data.get("slug", "")
-                        # Bỏ qua nếu là thư mục quốc gia gốc không có sub-creator (VD: _Vietnam, _UK)
-                        if not c_slug or (c_slug.startswith("_") and "/" not in c_slug):
-                            continue
-                        real_c_slug = c_slug if "/" in c_slug else f"_Vietnam/{c_slug}"
-                        if real_c_slug in seen_slugs:
-                            continue
-                        seen_slugs.add(real_c_slug)
-
-                        c_name = c_data.get("name") or real_c_slug.split("/")[-1]
-                        c_folder = real_c_slug.split("/")[0] if "/" in real_c_slug else "_Vietnam"
-                        c_info = get_country_info(c_folder)
-                        c_country = c_data.get("country") or c_info["name"]
-                        p_cnt = c_data.get("photos_count", 0)
-                        v_cnt = c_data.get("videos_count", 0)
-                        t_sz = c_data.get("total_size", 0)
-                        tot_files += (p_cnt + v_cnt)
-                        tot_bytes += t_sz
-                        cached_creators.append({
-                            "slug": real_c_slug,
-                            "name": c_name,
-                            "country": c_country,
-                            "country_flag": c_info["flag"],
-                            "photos_count": p_cnt,
-                            "videos_count": v_cnt,
-                            "total_files": p_cnt + v_cnt,
-                            "total_size": t_sz,
-                            "total_size_str": format_bytes(t_sz),
-                            "drive_url": f"https://drive.google.com/drive/folders/{c_data.get('id', '')}" if c_data.get('id') else ""
-                        })
-        if len(cached_creators) >= 10:
-            cached_creators.sort(key=lambda x: (x.get("country") != "Việt Nam", (x.get("country") or "").lower(), x["name"].lower()))
-            summary_res = {
-                "total_creators": len(cached_creators),
-                "total_files": tot_files,
-                "total_size": tot_bytes,
-                "total_size_str": format_bytes(tot_bytes),
-                "creators": cached_creators
-            }
-            set_cached("drive_summary_all", summary_res)
-            return summary_res
-
         cached_summary = get_cached("drive_summary_all")
         if cached_summary:
             valid_creators = [c for c in cached_summary.get("creators", []) if not (c.get("slug", "").startswith("_") and "/" not in c.get("slug", ""))]
             if len(valid_creators) == len(cached_summary.get("creators", [])):
                 return cached_summary
+
+        # Tối ưu siêu tốc (0.001s): Tổng hợp trực tiếp từ SQLite cache các creator đã nạp
+        try:
+            conn = _get_db()
+            with _db_lock:
+                cur = conn.cursor()
+                cur.execute("SELECT key, value FROM cache WHERE key LIKE 'drive_creator_items_%' AND key != 'drive_creator_items_all'")
+                rows = cur.fetchall()
+            cached_creators = []
+            tot_files = 0
+            tot_bytes = 0
+            seen_slugs = set()
+            for k, val_bytes in rows:
+                c_item = json.loads(zlib.decompress(val_bytes).decode("utf-8"))
+                c_data = c_item.get("data", {})
+                if isinstance(c_data, dict):
+                    c_slug = c_data.get("slug", "")
+                    if not c_slug or (c_slug.startswith("_") and "/" not in c_slug):
+                        continue
+                    real_c_slug = c_slug if "/" in c_slug else f"_Vietnam/{c_slug}"
+                    if real_c_slug in seen_slugs:
+                        continue
+                    seen_slugs.add(real_c_slug)
+
+                    c_name = c_data.get("name") or real_c_slug.split("/")[-1]
+                    c_folder = real_c_slug.split("/")[0] if "/" in real_c_slug else "_Vietnam"
+                    c_info = get_country_info(c_folder)
+                    c_country = c_data.get("country") or c_info["name"]
+                    p_cnt = c_data.get("photos_count", 0)
+                    v_cnt = c_data.get("videos_count", 0)
+                    t_sz = c_data.get("total_size", 0)
+                    tot_files += (p_cnt + v_cnt)
+                    tot_bytes += t_sz
+                    cached_creators.append({
+                        "slug": real_c_slug,
+                        "name": c_name,
+                        "country": c_country,
+                        "country_flag": c_info["flag"],
+                        "photos_count": p_cnt,
+                        "videos_count": v_cnt,
+                        "total_files": p_cnt + v_cnt,
+                        "total_size": t_sz,
+                        "total_size_str": format_bytes(t_sz),
+                        "drive_url": f"https://drive.google.com/drive/folders/{c_data.get('id', '')}" if c_data.get('id') else ""
+                    })
+            if len(cached_creators) >= 10:
+                cached_creators.sort(key=lambda x: (x.get("country") != "Việt Nam", (x.get("country") or "").lower(), x["name"].lower()))
+                summary_res = {
+                    "total_creators": len(cached_creators),
+                    "total_files": tot_files,
+                    "total_size": tot_bytes,
+                    "total_size_str": format_bytes(tot_bytes),
+                    "creators": cached_creators
+                }
+                set_cached("drive_summary_all", summary_res)
+                return summary_res
+        except Exception as e:
+            print(f"Lỗi đọc SQLite khi tổng hợp creator: {e}")
 
     raw_json = run_rclone([
         "lsjson", "gg:18TUBE", "--recursive", "--max-depth", "3",

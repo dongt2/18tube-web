@@ -18,7 +18,9 @@ scratch/
 tunnel_url.txt
 *.log
 .drive_cache.json
-.drive_cache.json.tmp*
+.drive_cache.json*
+.drive_cache.db-wal
+.drive_cache.db-shm
 
 # IDE & Config
 .vscode/

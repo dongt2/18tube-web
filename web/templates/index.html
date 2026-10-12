@@ -15,7 +15,7 @@
         rel="stylesheet">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=7">
+    <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 
 <body>
@@ -502,45 +502,201 @@
                         </p>
                     </div>
 
-                    <!-- VERIFY INPUT FORM -->
-                    <div class="verify-card">
-                        <div class="verify-form">
-                            <div class="form-group flex-1">
-                                <label for="verify-input">Đường dẫn 18tube hoặc Tên Creator:</label>
-                                <div class="input-with-icon">
-                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-                                        stroke-width="2">
-                                        <circle cx="12" cy="12" r="10"></circle>
-                                        <line x1="2" y1="12" x2="22" y2="12"></line>
-                                        <path
-                                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
-                                        </path>
+                    <!-- SUB-TABS: CHỌN CHẾ ĐỘ ĐỐI SOÁT -->
+                    <div class="verify-mode-nav">
+                        <button class="verify-mode-btn active" id="btn-mode-batch" data-mode="batch">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                            </svg>
+                            <span>⚡ Đối Soát Toàn Bộ (126 Creator)</span>
+                        </button>
+                        <button class="verify-mode-btn" id="btn-mode-single" data-mode="single">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <span>🔍 Kiểm Tra Đơn Lẻ (Từng Creator)</span>
+                        </button>
+                    </div>
+
+                    <!-- CHẾ ĐỘ 1: BATCH AUDIT ALL CREATORS -->
+                    <div id="verify-batch-view" class="verify-view-pane active">
+                        <!-- BATCH ACTION BAR -->
+                        <div class="batch-action-bar">
+                            <div class="batch-action-left">
+                                <button class="btn btn-primary btn-large" id="btn-start-batch-verify">
+                                    <span class="spinner" id="batch-verify-spinner" style="display: none;"></span>
+                                    <span id="batch-verify-btn-text">⚡ Bắt Đầu Quét Toàn Bộ 126 Creator</span>
+                                </button>
+                                <button class="btn btn-danger" id="btn-stop-batch-verify" style="display: none;">
+                                    ⏹ Dừng Quét
+                                </button>
+                                <span class="batch-last-time" id="batch-last-time">Chưa có dữ liệu đối soát</span>
+                            </div>
+                            <div class="batch-action-right">
+                                <button class="btn btn-secondary" id="btn-export-audit-csv">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
                                     </svg>
-                                    <input type="text" id="verify-input"
-                                        placeholder="Ví dụ: https://18tube.nl/kimxu1209 hoặc kimxu1209"
-                                        value="kimxu1209">
+                                    <span>Xuất CSV Báo Cáo</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- BATCH PROGRESS CARD -->
+                        <div class="batch-progress-card" id="batch-progress-card" style="display: none;">
+                            <div class="batch-progress-info">
+                                <span class="batch-progress-status" id="batch-progress-status">Đang đối soát: 0 / 126</span>
+                                <span class="batch-progress-current" id="batch-progress-current">Đang chuẩn bị...</span>
+                                <span class="batch-progress-pct" id="batch-progress-pct">0%</span>
+                            </div>
+                            <div class="batch-progress-track">
+                                <div class="batch-progress-bar" id="batch-progress-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- BATCH KPI SUMMARY CARDS -->
+                        <div class="batch-kpi-grid" id="batch-kpi-grid">
+                            <div class="metric-card cyan">
+                                <div class="metric-icon-box">
+                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                        <line x1="8" y1="21" x2="16" y2="21"></line>
+                                        <line x1="12" y1="17" x2="12" y2="21"></line>
+                                    </svg>
+                                </div>
+                                <div class="metric-body">
+                                    <span class="metric-label">Tổng Creator Đã Quét</span>
+                                    <h2 class="metric-value" id="kpi-total-creators">0</h2>
+                                    <span class="metric-hint">Đối soát với 18tube.nl</span>
+                                </div>
+                            </div>
+                            <div class="metric-card emerald">
+                                <div class="metric-icon-box">
+                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                    </svg>
+                                </div>
+                                <div class="metric-body">
+                                    <span class="metric-label">Đầy Đủ 100%</span>
+                                    <h2 class="metric-value text-success" id="kpi-complete-creators">0</h2>
+                                    <span class="metric-hint">Không thiếu bất kỳ file nào</span>
+                                </div>
+                            </div>
+                            <div class="metric-card amber">
+                                <div class="metric-icon-box">
+                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                    </svg>
+                                </div>
+                                <div class="metric-body">
+                                    <span class="metric-label">Đang Thiếu File</span>
+                                    <h2 class="metric-value text-warning" id="kpi-missing-creators">0</h2>
+                                    <span class="metric-hint">Cần tải bổ sung</span>
+                                </div>
+                            </div>
+                            <div class="metric-card purple">
+                                <div class="metric-icon-box">
+                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                                    </svg>
+                                </div>
+                                <div class="metric-body">
+                                    <span class="metric-label">Tổng File Còn Thiếu</span>
+                                    <h2 class="metric-value" id="kpi-total-missing-files">0</h2>
+                                    <span class="metric-hint" id="kpi-missing-breakdown">-- Ảnh / -- Video</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- BATCH RESULTS TABLE SECTION -->
+                        <div class="panel-section" id="batch-table-section">
+                            <div class="section-header">
+                                <div class="section-title-wrap">
+                                    <h3 class="section-title">Bảng Chi Tiết Kết Quả Đối Soát</h3>
+                                    <span class="section-badge" id="batch-table-badge">0 Creator</span>
+                                </div>
+                                <div class="section-actions">
+                                    <div class="filter-pills" id="batch-status-filters">
+                                        <button class="pill-btn active" data-filter="all">Tất cả (<span id="cnt-batch-all">0</span>)</button>
+                                        <button class="pill-btn" data-filter="missing">⚠️ Thiếu File (<span id="cnt-batch-missing">0</span>)</button>
+                                        <button class="pill-btn" data-filter="complete">✅ Đầy Đủ 100% (<span id="cnt-batch-complete">0</span>)</button>
+                                        <button class="pill-btn" data-filter="not_found">❓ Lỗi/404 (<span id="cnt-batch-notfound">0</span>)</button>
+                                    </div>
+                                    <div class="search-input-box">
+                                        <input type="text" class="input-search" id="batch-table-search" placeholder="Tìm theo tên creator...">
+                                    </div>
                                 </div>
                             </div>
 
-                            <div class="form-group">
-                                <label for="verify-source-select">Nguồn đối soát:</label>
-                                <select id="verify-source-select" class="select-styled">
-                                    <option value="drive">☁️ Google Drive (gg:18TUBE)</option>
-                                    <option value="local">💻 Máy tính (E:\New folder (3))</option>
-                                </select>
+                            <div class="batch-table-wrapper">
+                                <table class="batch-audit-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 45px;">#</th>
+                                            <th>Creator</th>
+                                            <th>Gốc Trên 18tube</th>
+                                            <th>Đã Tải Lên Drive</th>
+                                            <th>Chênh Lệch Thiếu</th>
+                                            <th style="width: 140px;">Mức Độ Đầy Đủ</th>
+                                            <th>Trạng Thái</th>
+                                            <th style="text-align: right;">Thao Tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="batch-audit-tbody">
+                                        <tr>
+                                            <td colspan="8" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                                                Bấm nút <strong>⚡ Bắt Đầu Quét Toàn Bộ 126 Creator</strong> ở trên để khởi chạy tiến trình đối soát tự động.
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CHẾ ĐỘ 2: KIỂM TRA ĐƠN LẺ -->
+                    <div id="verify-single-view" class="verify-view-pane" style="display: none;">
+                        <div class="verify-card">
+                            <div class="verify-form">
+                                <div class="form-group flex-1">
+                                    <label for="verify-input">Đường dẫn 18tube hoặc Tên Creator:</label>
+                                    <div class="input-with-icon">
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                                        </svg>
+                                        <input type="text" id="verify-input" placeholder="Ví dụ: https://18tube.nl/kimxu1209 hoặc kimxu1209" value="kimxu1209">
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="verify-source-select">Nguồn đối soát:</label>
+                                    <select id="verify-source-select" class="select-styled">
+                                        <option value="drive">☁️ Google Drive (gg:18TUBE)</option>
+                                        <option value="local">💻 Máy tính (E:\New folder (3))</option>
+                                    </select>
+                                </div>
+
+                                <button class="btn btn-primary btn-large" id="btn-start-verify">
+                                    <span class="spinner" id="verify-spinner" style="display: none;"></span>
+                                    <span id="verify-btn-text">Kiểm Tra Ngay</span>
+                                </button>
                             </div>
 
-                            <button class="btn btn-primary btn-large" id="btn-start-verify">
-                                <span class="spinner" id="verify-spinner" style="display: none;"></span>
-                                <span id="verify-btn-text">Kiểm Tra Ngay</span>
-                            </button>
-                        </div>
-
-                        <!-- SUGGESTED CREATORS -->
-                        <div class="quick-suggest-row">
-                            <span class="suggest-label">Gợi ý nhanh từ Drive:</span>
-                            <div class="suggest-chips" id="verify-suggest-chips">
-                                <!-- Populated dynamically -->
+                            <!-- SUGGESTED CREATORS -->
+                            <div class="quick-suggest-row">
+                                <span class="suggest-label">Gợi ý nhanh từ Drive:</span>
+                                <div class="suggest-chips" id="verify-suggest-chips">
+                                    <!-- Populated dynamically -->
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -701,7 +857,7 @@
 
     <!-- VIDEO.JS & MAIN APP SCRIPT -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-    <script src="/static/app.js?v=7"></script>
+    <script src="/static/app.js?v=8"></script>
 </body>
 
 </html>

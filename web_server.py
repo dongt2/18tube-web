@@ -1384,6 +1384,215 @@ def api_verify_creator():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ----------------- BATCH VERIFY ALL CREATORS -----------------
+
+_verify_all_state = {
+    "running": False,
+    "progress": 0,
+    "total": 0,
+    "current_slug": "",
+    "results": [],
+    "summary": {
+        "total_creators": 0,
+        "complete_count": 0,
+        "missing_count": 0,
+        "not_found_count": 0,
+        "total_missing_photos": 0,
+        "total_missing_videos": 0,
+        "total_missing_files": 0
+    },
+    "last_updated": 0,
+    "error": None
+}
+_verify_all_lock = threading.Lock()
+_verify_all_stop_flag = False
+
+def _run_verify_all_worker():
+    global _verify_all_state, _verify_all_stop_flag
+    try:
+        # Lấy danh sách creator từ drive_summary_all hoặc cache
+        summary_data = build_all_drive_cache(force=False)
+        creators = summary_data.get("creators", []) if summary_data else []
+        if not creators:
+            creators = get_cached("drive_creators_list") or []
+
+        with _verify_all_lock:
+            _verify_all_state["running"] = True
+            _verify_all_state["progress"] = 0
+            _verify_all_state["total"] = len(creators)
+            _verify_all_state["results"] = []
+            _verify_all_state["error"] = None
+            _verify_all_stop_flag = False
+
+        def check_single(c):
+            if _verify_all_stop_flag:
+                return None
+            slug = c.get("slug", "")
+            web_slug = slug.split("/")[-1]
+            c_name = c.get("name") or web_slug
+            c_country = c.get("country", "Việt Nam")
+            drive_photos = c.get("photos_count", 0)
+            drive_videos = c.get("videos_count", 0)
+            drive_total = drive_photos + drive_videos
+            drive_size_str = c.get("total_size_str", "0 B")
+
+            meta = downloader.fetch_creator_metadata(web_slug)
+            online_total = meta.get("total_all", 0)
+            online_photos = meta.get("total_images", 0)
+            online_videos = meta.get("total_videos", 0)
+
+            diff_photos = max(0, online_photos - drive_photos)
+            diff_videos = max(0, online_videos - drive_videos)
+            diff_total = max(0, online_total - drive_total)
+
+            if online_total > 0:
+                completion_pct = min(100.0, round((drive_total / online_total) * 100, 1))
+            elif drive_total > 0:
+                completion_pct = 100.0
+            else:
+                completion_pct = 0.0
+
+            if online_total == 0:
+                status = "not_found"
+                status_label = "Không tìm thấy trên web"
+                status_color = "secondary"
+            elif drive_total == 0:
+                status = "empty"
+                status_label = "Chưa có trên Drive"
+                status_color = "danger"
+            elif diff_photos == 0 and diff_videos == 0:
+                status = "complete"
+                status_label = "Đầy đủ 100%"
+                status_color = "success"
+            else:
+                status = "missing"
+                status_label = f"Thiếu {diff_photos} ảnh, {diff_videos} video"
+                status_color = "amber"
+
+            item_res = {
+                "slug": slug,
+                "web_slug": web_slug,
+                "name": c_name,
+                "country": c_country,
+                "avatar_url": meta.get("avatar_url"),
+                "online": {
+                    "total": online_total,
+                    "photos": online_photos,
+                    "videos": online_videos
+                },
+                "drive": {
+                    "total": drive_total,
+                    "photos": drive_photos,
+                    "videos": drive_videos,
+                    "size_str": drive_size_str
+                },
+                "missing": {
+                    "total": diff_total,
+                    "photos": diff_photos,
+                    "videos": diff_videos
+                },
+                "completion_pct": completion_pct,
+                "status": status,
+                "status_label": status_label,
+                "status_color": status_color
+            }
+
+            with _verify_all_lock:
+                _verify_all_state["progress"] += 1
+                _verify_all_state["current_slug"] = c_name
+                _verify_all_state["results"].append(item_res)
+
+            return item_res
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(check_single, creators))
+
+        # Tổng hợp báo cáo
+        with _verify_all_lock:
+            final_results = [r for r in _verify_all_state["results"] if r is not None]
+            # Sắp xếp: Ưu tiên creator thiếu file lên đầu, sau đó theo completion_pct tăng dần
+            final_results.sort(key=lambda x: (
+                0 if x["status"] == "missing" else (1 if x["status"] == "empty" else 2),
+                x["completion_pct"],
+                x["name"].lower()
+            ))
+            _verify_all_state["results"] = final_results
+
+            tot_creators = len(final_results)
+            comp_cnt = sum(1 for r in final_results if r["status"] == "complete")
+            miss_cnt = sum(1 for r in final_results if r["status"] == "missing")
+            nf_cnt = sum(1 for r in final_results if r["status"] == "not_found")
+            tot_miss_p = sum(r["missing"]["photos"] for r in final_results)
+            tot_miss_v = sum(r["missing"]["videos"] for r in final_results)
+
+            summary = {
+                "total_creators": tot_creators,
+                "complete_count": comp_cnt,
+                "missing_count": miss_cnt,
+                "not_found_count": nf_cnt,
+                "total_missing_photos": tot_miss_p,
+                "total_missing_videos": tot_miss_v,
+                "total_missing_files": tot_miss_p + tot_miss_v
+            }
+            _verify_all_state["summary"] = summary
+            _verify_all_state["running"] = False
+            _verify_all_state["last_updated"] = time.time()
+
+            # Lưu vào SQLite cache persistent
+            set_cached("verify_all_report", {
+                "summary": summary,
+                "results": final_results,
+                "last_updated": _verify_all_state["last_updated"]
+            })
+
+    except Exception as e:
+        with _verify_all_lock:
+            _verify_all_state["running"] = False
+            _verify_all_state["error"] = str(e)
+        print(f"Lỗi chạy worker verify all: {e}")
+
+@app.route("/api/verify/all/start", methods=["POST"])
+def api_verify_all_start():
+    global _verify_all_state, _verify_all_stop_flag
+    with _verify_all_lock:
+        if _verify_all_state["running"]:
+            return jsonify({"success": True, "message": "Quá trình đối soát đang chạy...", "running": True})
+        _verify_all_stop_flag = False
+        threading.Thread(target=_run_verify_all_worker, daemon=True).start()
+    return jsonify({"success": True, "message": "Đã bắt đầu đối soát toàn bộ creator!", "running": True})
+
+@app.route("/api/verify/all/status")
+def api_verify_all_status():
+    global _verify_all_state
+    with _verify_all_lock:
+        if not _verify_all_state["running"] and not _verify_all_state["results"]:
+            cached = get_cached("verify_all_report")
+            if cached:
+                _verify_all_state["results"] = cached.get("results", [])
+                _verify_all_state["summary"] = cached.get("summary", {})
+                _verify_all_state["total"] = len(_verify_all_state["results"])
+                _verify_all_state["progress"] = len(_verify_all_state["results"])
+                _verify_all_state["last_updated"] = cached.get("last_updated", 0)
+
+        data = {
+            "success": True,
+            "running": _verify_all_state["running"],
+            "progress": _verify_all_state["progress"],
+            "total": _verify_all_state["total"],
+            "current_slug": _verify_all_state["current_slug"],
+            "summary": _verify_all_state["summary"],
+            "results": _verify_all_state["results"],
+            "last_updated": _verify_all_state["last_updated"],
+            "error": _verify_all_state["error"]
+        }
+    return jsonify(data)
+
+@app.route("/api/verify/all/stop", methods=["POST"])
+def api_verify_all_stop():
+    global _verify_all_stop_flag
+    _verify_all_stop_flag = True
+    return jsonify({"success": True, "message": "Đã gửi yêu cầu dừng đối soát."})
+
 # ----------------- SYSTEM ACTION API -----------------
 
 @app.route("/api/system/open_folder", methods=["POST"])

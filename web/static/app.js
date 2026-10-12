@@ -32,6 +32,16 @@
 
         verifyTarget: 'kimxu1209',
         verifySource: 'drive',
+
+        // Batch Audit State
+        batchVerify: {
+            running: false,
+            results: [],
+            summary: null,
+            filter: 'all',
+            search: '',
+            timer: null
+        }
     };
 
     // DOM Elements
@@ -107,7 +117,39 @@
         localFileSearch: document.getElementById('local-file-search'),
         localFilesGrid: document.getElementById('local-files-grid'),
 
-        // Verify
+        // Verify Mode Navigation
+        btnModeBatch: document.getElementById('btn-mode-batch'),
+        btnModeSingle: document.getElementById('btn-mode-single'),
+        verifyBatchView: document.getElementById('verify-batch-view'),
+        verifySingleView: document.getElementById('verify-single-view'),
+
+        // Batch Verify
+        btnStartBatchVerify: document.getElementById('btn-start-batch-verify'),
+        btnStopBatchVerify: document.getElementById('btn-stop-batch-verify'),
+        batchVerifySpinner: document.getElementById('batch-verify-spinner'),
+        batchVerifyBtnText: document.getElementById('batch-verify-btn-text'),
+        batchLastTime: document.getElementById('batch-last-time'),
+        btnExportAuditCsv: document.getElementById('btn-export-audit-csv'),
+        batchProgressCard: document.getElementById('batch-progress-card'),
+        batchProgressStatus: document.getElementById('batch-progress-status'),
+        batchProgressCurrent: document.getElementById('batch-progress-current'),
+        batchProgressPct: document.getElementById('batch-progress-pct'),
+        batchProgressFill: document.getElementById('batch-progress-fill'),
+        kpiTotalCreators: document.getElementById('kpi-total-creators'),
+        kpiCompleteCreators: document.getElementById('kpi-complete-creators'),
+        kpiMissingCreators: document.getElementById('kpi-missing-creators'),
+        kpiTotalMissingFiles: document.getElementById('kpi-total-missing-files'),
+        kpiMissingBreakdown: document.getElementById('kpi-missing-breakdown'),
+        batchTableBadge: document.getElementById('batch-table-badge'),
+        batchStatusFilters: document.getElementById('batch-status-filters'),
+        batchTableSearch: document.getElementById('batch-table-search'),
+        batchAuditTbody: document.getElementById('batch-audit-tbody'),
+        cntBatchAll: document.getElementById('cnt-batch-all'),
+        cntBatchMissing: document.getElementById('cnt-batch-missing'),
+        cntBatchComplete: document.getElementById('cnt-batch-complete'),
+        cntBatchNotfound: document.getElementById('cnt-batch-notfound'),
+
+        // Single Verify
         verifyInput: document.getElementById('verify-input'),
         verifySourceSelect: document.getElementById('verify-source-select'),
         btnStartVerify: document.getElementById('btn-start-verify'),
@@ -1206,6 +1248,347 @@
     }
 
     // ==========================================
+    // BATCH AUDIT ALL CREATORS (ĐỐI SOÁT TOÀN BỘ)
+    // ==========================================
+
+    function initBatchVerify() {
+        if (!elements.btnModeBatch || !elements.btnModeSingle) return;
+
+        // Switch chế độ Batch vs Single
+        elements.btnModeBatch.addEventListener('click', () => {
+            elements.btnModeBatch.classList.add('active');
+            elements.btnModeSingle.classList.remove('active');
+            elements.verifyBatchView.classList.add('active');
+            elements.verifyBatchView.style.display = 'block';
+            elements.verifySingleView.classList.remove('active');
+            elements.verifySingleView.style.display = 'none';
+        });
+
+        elements.btnModeSingle.addEventListener('click', () => {
+            elements.btnModeSingle.classList.add('active');
+            elements.btnModeBatch.classList.remove('active');
+            elements.verifySingleView.classList.add('active');
+            elements.verifySingleView.style.display = 'block';
+            elements.verifyBatchView.classList.remove('active');
+            elements.verifyBatchView.style.display = 'none';
+        });
+
+        // Bắt đầu quét toàn bộ
+        elements.btnStartBatchVerify.addEventListener('click', () => {
+            startBatchVerify();
+        });
+
+        // Dừng quét
+        elements.btnStopBatchVerify.addEventListener('click', async () => {
+            try {
+                await fetch('/api/verify/all/stop', { method: 'POST' });
+                showToast('Đang gửi lệnh dừng đối soát...', 'info');
+            } catch (err) {
+                console.error(err);
+            }
+        });
+
+        // Lọc trạng thái trong bảng
+        elements.batchStatusFilters.querySelectorAll('.pill-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                elements.batchStatusFilters.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.batchVerify.filter = btn.getAttribute('data-filter');
+                renderBatchAuditTable();
+            });
+        });
+
+        // Tìm kiếm creator trong bảng
+        elements.batchTableSearch.addEventListener('input', () => {
+            state.batchVerify.search = elements.batchTableSearch.value.trim().toLowerCase();
+            renderBatchAuditTable();
+        });
+
+        // Xuất CSV báo cáo
+        elements.btnExportAuditCsv.addEventListener('click', () => {
+            exportBatchAuditCsv();
+        });
+
+        // Tự động kiểm tra trạng thái hoặc nạp cache đã có
+        checkBatchVerifyInitial();
+    }
+
+    async function checkBatchVerifyInitial() {
+        try {
+            const res = await fetch('/api/verify/all/status');
+            const data = await res.json();
+            if (data.success) {
+                if (data.running) {
+                    setBatchVerifyUiRunning(true);
+                    pollBatchVerifyStatus();
+                } else if (data.results && data.results.length > 0) {
+                    state.batchVerify.results = data.results;
+                    state.batchVerify.summary = data.summary;
+                    renderBatchAuditSummary(data.summary);
+                    renderBatchAuditTable();
+                    if (data.last_updated) {
+                        elements.batchLastTime.textContent = `Lần quét gần nhất: ${formatDate(new Date(data.last_updated * 1000).toISOString())}`;
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Error checking initial batch verify status:', err);
+        }
+    }
+
+    function setBatchVerifyUiRunning(isRunning) {
+        state.batchVerify.running = isRunning;
+        if (isRunning) {
+            elements.btnStartBatchVerify.disabled = true;
+            elements.batchVerifySpinner.style.display = 'inline-block';
+            elements.batchVerifyBtnText.textContent = 'Đang Quét Đối Soát...';
+            elements.btnStopBatchVerify.style.display = 'inline-flex';
+            elements.batchProgressCard.style.display = 'flex';
+        } else {
+            elements.btnStartBatchVerify.disabled = false;
+            elements.batchVerifySpinner.style.display = 'none';
+            elements.batchVerifyBtnText.textContent = '🔄 Quét Lại Toàn Bộ 126 Creator';
+            elements.btnStopBatchVerify.style.display = 'none';
+            elements.batchProgressCard.style.display = 'none';
+        }
+    }
+
+    async function startBatchVerify() {
+        setBatchVerifyUiRunning(true);
+        showToast('Bắt đầu đối soát toàn bộ creator từ 18tube.nl...', 'info');
+
+        try {
+            const res = await fetch('/api/verify/all/start', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                pollBatchVerifyStatus();
+            } else {
+                showToast(data.message || 'Không thể bắt đầu', 'error');
+                setBatchVerifyUiRunning(false);
+            }
+        } catch (err) {
+            showToast('Lỗi khi gửi yêu cầu đối soát toàn bộ', 'error');
+            setBatchVerifyUiRunning(false);
+        }
+    }
+
+    function pollBatchVerifyStatus() {
+        if (state.batchVerify.timer) clearInterval(state.batchVerify.timer);
+
+        state.batchVerify.timer = setInterval(async () => {
+            try {
+                const res = await fetch('/api/verify/all/status');
+                const data = await res.json();
+                if (data.success) {
+                    const total = data.total || 126;
+                    const progress = data.progress || 0;
+                    const pct = Math.min(100, Math.round((progress / total) * 100));
+
+                    // Cập nhật thanh tiến trình
+                    elements.batchProgressStatus.textContent = `Đang đối soát: ${progress} / ${total} Creator`;
+                    elements.batchProgressCurrent.textContent = data.current_slug ? `Đang kiểm tra: ${data.current_slug}` : 'Đang xử lý...';
+                    elements.batchProgressPct.textContent = `${pct}%`;
+                    elements.batchProgressFill.style.width = `${pct}%`;
+
+                    // Render bảng kết quả tạm thời nếu có
+                    if (data.results && data.results.length > 0) {
+                        state.batchVerify.results = data.results;
+                        state.batchVerify.summary = data.summary;
+                        renderBatchAuditSummary(data.summary);
+                        renderBatchAuditTable();
+                    }
+
+                    if (!data.running) {
+                        clearInterval(state.batchVerify.timer);
+                        state.batchVerify.timer = null;
+                        setBatchVerifyUiRunning(false);
+                        showToast('Hoàn tất đối soát toàn bộ Creator!', 'success');
+                        if (data.last_updated) {
+                            elements.batchLastTime.textContent = `Lần quét gần nhất: ${formatDate(new Date(data.last_updated * 1000).toISOString())}`;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Polling batch verify error:', err);
+            }
+        }, 1200);
+    }
+
+    function renderBatchAuditSummary(summary) {
+        if (!summary) return;
+        elements.kpiTotalCreators.textContent = summary.total_creators || 0;
+        elements.kpiCompleteCreators.textContent = summary.complete_count || 0;
+        elements.kpiMissingCreators.textContent = summary.missing_count || 0;
+        elements.kpiTotalMissingFiles.textContent = (summary.total_missing_files || 0).toLocaleString('vi-VN');
+        elements.kpiMissingBreakdown.textContent = `${(summary.total_missing_photos || 0).toLocaleString('vi-VN')} Ảnh / ${(summary.total_missing_videos || 0).toLocaleString('vi-VN')} Video`;
+
+        // Cập nhật các badge số lượng trên filter buttons
+        elements.cntBatchAll.textContent = summary.total_creators || 0;
+        elements.cntBatchMissing.textContent = summary.missing_count || 0;
+        elements.cntBatchComplete.textContent = summary.complete_count || 0;
+        elements.cntBatchNotfound.textContent = summary.not_found_count || 0;
+    }
+
+    function renderBatchAuditTable() {
+        const results = state.batchVerify.results || [];
+        const filter = state.batchVerify.filter || 'all';
+        const query = state.batchVerify.search || '';
+
+        const filtered = results.filter(item => {
+            const matchesQuery = !query || 
+                item.name.toLowerCase().includes(query) || 
+                item.web_slug.toLowerCase().includes(query) ||
+                (item.country && item.country.toLowerCase().includes(query));
+
+            if (!matchesQuery) return false;
+
+            if (filter === 'missing') return item.status === 'missing' || item.status === 'empty';
+            if (filter === 'complete') return item.status === 'complete';
+            if (filter === 'not_found') return item.status === 'not_found';
+            return true;
+        });
+
+        elements.batchTableBadge.textContent = `${filtered.length} / ${results.length} Creator`;
+
+        if (filtered.length === 0) {
+            elements.batchAuditTbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                        Không tìm thấy creator nào phù hợp với bộ lọc hiện tại.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        elements.batchAuditTbody.innerHTML = filtered.map((item, idx) => {
+            const flagHtml = getCountryFlagHtml(item.country);
+            const initial = item.name.charAt(0).toUpperCase();
+            const avatarBg = getAvatarGradient(item.name);
+
+            // Badge trạng thái
+            let statusBadge = '';
+            if (item.status === 'complete') {
+                statusBadge = `<span class="batch-diff-badge complete">✅ Đầy đủ 100%</span>`;
+            } else if (item.status === 'missing') {
+                statusBadge = `<span class="batch-diff-badge missing">⚠️ Thiếu ${item.missing.photos} ảnh, ${item.missing.videos} video</span>`;
+            } else if (item.status === 'empty') {
+                statusBadge = `<span class="batch-diff-badge empty">❌ Chưa có trên Drive</span>`;
+            } else {
+                statusBadge = `<span class="batch-diff-badge not_found">❓ Không tìm thấy trên web</span>`;
+            }
+
+            // Progress bar mini
+            const pct = item.completion_pct || 0;
+            const progressColorClass = pct === 100 ? '' : (pct > 70 ? 'warning' : 'danger');
+
+            return `
+                <tr>
+                    <td style="color: var(--text-muted); font-size: 0.76rem;">${idx + 1}</td>
+                    <td>
+                        <div class="batch-creator-cell">
+                            <div class="batch-creator-avatar" style="background: ${avatarBg};">
+                                ${initial}
+                            </div>
+                            <div class="batch-creator-info">
+                                <span class="batch-creator-title">${item.name}</span>
+                                <span class="batch-creator-sub">${flagHtml} ${item.country || 'Việt Nam'}</span>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <div style="font-weight: 600; color: #fff;">${item.online.total.toLocaleString('vi-VN')} tệp</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">${item.online.photos} ảnh • ${item.online.videos} video</div>
+                    </td>
+                    <td>
+                        <div style="font-weight: 600; color: #fff;">${item.drive.total.toLocaleString('vi-VN')} tệp</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">${item.drive.photos} ảnh • ${item.drive.videos} video (${item.drive.size_str})</div>
+                    </td>
+                    <td>
+                        ${item.missing.total > 0 
+                            ? `<span style="color: var(--accent-amber); font-weight: 700;">-${item.missing.total.toLocaleString('vi-VN')}</span> <span style="font-size: 0.72rem; color: var(--text-muted);">(-${item.missing.photos} 📸, -${item.missing.videos} 🎬)</span>` 
+                            : `<span style="color: var(--accent-emerald); font-weight: 600;">0 (Khớp 100%)</span>`
+                        }
+                    </td>
+                    <td>
+                        <div style="display: flex; align-items: center;">
+                            <div class="batch-progress-bar-mini">
+                                <div class="batch-progress-fill-mini ${progressColorClass}" style="width: ${pct}%;"></div>
+                            </div>
+                            <span style="font-weight: 700; font-size: 0.8rem;">${pct}%</span>
+                        </div>
+                    </td>
+                    <td>
+                        ${statusBadge}
+                    </td>
+                    <td style="text-align: right;">
+                        <div class="batch-actions-cell">
+                            <a href="/gallery?creator=${encodeURIComponent(item.slug)}" target="_blank" class="btn btn-secondary btn-sm" title="Mở Cinema Gallery">
+                                🎬 Gallery
+                            </a>
+                            <button class="btn btn-primary btn-sm btn-inspect-single" data-slug="${item.slug}" title="Xem chi tiết trên Inspector">
+                                🔍 Chi tiết
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Gắn sự kiện nút chi tiết
+        elements.batchAuditTbody.querySelectorAll('.btn-inspect-single').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const slug = btn.getAttribute('data-slug');
+                switchToDriveTabAndSelect(slug);
+            });
+        });
+    }
+
+    function exportBatchAuditCsv() {
+        const results = state.batchVerify.results || [];
+        if (results.length === 0) {
+            showToast('Chưa có dữ liệu để xuất file CSV', 'warning');
+            return;
+        }
+
+        let csvContent = '\uFEFF'; // BOM UTF-8 for Excel
+        csvContent += 'STT,Creator,Slug,Quoc Gia,18tube Tong,18tube Anh,18tube Video,Drive Tong,Drive Anh,Drive Video,Drive Dung Luong,Thieu Tong,Thieu Anh,Thieu Video,Ty Le Hoan Thanh,Trang Thai\n';
+
+        results.forEach((r, idx) => {
+            const row = [
+                idx + 1,
+                `"${(r.name || '').replace(/"/g, '""')}"`,
+                `"${r.slug}"`,
+                `"${r.country || 'Việt Nam'}"`,
+                r.online.total,
+                r.online.photos,
+                r.online.videos,
+                r.drive.total,
+                r.drive.photos,
+                r.drive.videos,
+                `"${r.drive.size_str}"`,
+                r.missing.total,
+                r.missing.photos,
+                r.missing.videos,
+                `${r.completion_pct}%`,
+                `"${r.status_label}"`
+            ];
+            csvContent += row.join(',') + '\n';
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `18TUBE_Audit_Report_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('Đã xuất file báo cáo CSV thành công!', 'success');
+    }
+
+    // ==========================================
     // EVENT LISTENERS INITIALIZATION
     // ==========================================
 
@@ -1362,6 +1745,7 @@
         initTabs();
         initModals();
         initEventListeners();
+        initBatchVerify();
 
         // 1. Tải nhanh thông tin Drive, Creator list (1-2s) và Local creators song song
         await Promise.all([

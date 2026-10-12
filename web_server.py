@@ -12,6 +12,7 @@ import time
 import re
 import mimetypes
 import hashlib
+import gzip
 import shutil
 import subprocess
 import threading
@@ -35,41 +36,11 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 THUMBNAILS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".thumbnails")
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
-def init_cloud_environment():
-    """Tự động cấu hình rclone từ biến môi trường Cloud (Botkeep, Render, Railway, v.v.)."""
-    import base64
-    b64_cfg = os.environ.get("RCLONE_CONFIG_BASE64", "").strip()
-    raw_cfg = os.environ.get("RCLONE_CONFIG", "").strip()
-    if b64_cfg:
-        conf_dir = os.path.expanduser("~/.config/rclone")
-        os.makedirs(conf_dir, exist_ok=True)
-        conf_file = os.path.join(conf_dir, "rclone.conf")
-        try:
-            cfg_text = base64.b64decode(b64_cfg.encode("ascii")).decode("utf-8", errors="ignore")
-            with open(conf_file, "w", encoding="utf-8") as f:
-                f.write(cfg_text)
-            os.environ["RCLONE_CONFIG"] = conf_file
-            print(f"[OK] Đã tự động cấu hình Google Drive từ biến RCLONE_CONFIG_BASE64 -> {conf_file}")
-        except Exception as e:
-            print(f"[!] Lỗi khi nạp RCLONE_CONFIG_BASE64: {e}")
-    elif raw_cfg and "\n" in raw_cfg:
-        conf_dir = os.path.expanduser("~/.config/rclone")
-        os.makedirs(conf_dir, exist_ok=True)
-        conf_file = os.path.join(conf_dir, "rclone.conf")
-        try:
-            with open(conf_file, "w", encoding="utf-8") as f:
-                f.write(raw_cfg)
-            os.environ["RCLONE_CONFIG"] = conf_file
-            print(f"[OK] Đã nạp cấu hình Google Drive từ biến RCLONE_CONFIG -> {conf_file}")
-        except Exception as e:
-            print(f"[!] Lỗi khi ghi RCLONE_CONFIG: {e}")
-
-init_cloud_environment()
-
 # Global persistent cache for rclone results to keep web UI instant
 # Structure: { cache_key: { "data": ..., "timestamp": float } }
 CACHE_TTL = 3600  # 1 hour
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".drive_cache.json")
+CACHE_GZ_FILE = CACHE_FILE + ".gz"
 _cache = {}
 _cache_lock = threading.Lock()
 _save_lock = threading.Lock()
@@ -80,9 +51,9 @@ def _cleanup_stale_tmp_files():
     """Dọn dẹp các file cache tạm cũ do tiến trình trước để lại."""
     try:
         cache_dir = os.path.dirname(os.path.abspath(CACHE_FILE))
-        prefix = os.path.basename(CACHE_FILE) + ".tmp"
+        prefix = os.path.basename(CACHE_FILE)
         for fname in os.listdir(cache_dir):
-            if fname.startswith(prefix):
+            if fname.startswith(prefix) and ".tmp" in fname:
                 try:
                     os.remove(os.path.join(cache_dir, fname))
                 except OSError:
@@ -93,26 +64,32 @@ def _cleanup_stale_tmp_files():
 def _load_cache_from_disk():
     global _cache
     _cleanup_stale_tmp_files()
+    raw_content = None
     if os.path.isfile(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-            if not content:
-                return
-            try:
-                loaded = json.loads(content)
-            except json.JSONDecodeError as jde:
-                if jde.pos and jde.pos > 0:
-                    loaded = json.loads(content[:jde.pos])
-                else:
-                    raise
+                raw_content = f.read().strip()
+        except Exception as e:
+            print(f"Lỗi nạp cache từ đĩa {CACHE_FILE}: {e}")
+    elif os.path.isfile(CACHE_GZ_FILE):
+        try:
+            with gzip.open(CACHE_GZ_FILE, "rt", encoding="utf-8") as f:
+                raw_content = f.read().strip()
+            print(f"[*] Đã nạp thành công bộ nhớ đệm Drive nén từ: {CACHE_GZ_FILE}")
+        except Exception as e:
+            print(f"Lỗi nạp cache nén {CACHE_GZ_FILE}: {e}")
+
+    if raw_content:
+        try:
+            loaded = json.loads(raw_content)
             if isinstance(loaded, dict):
                 if "drive_creator_items_all" in loaded:
                     del loaded["drive_creator_items_all"]
                 with _cache_lock:
                     _cache = loaded
+                print(f"[OK] Đã nạp sẵn {len(_cache)} mục dữ liệu Google Drive vào RAM!")
         except Exception as e:
-            print(f"Lỗi nạp cache từ đĩa: {e}")
+            print(f"Lỗi phân tích JSON cache: {e}")
 
 def _save_cache_to_disk():
     """Ghi cache RAM ra đĩa an toàn đa tiến trình, retry xử lý xung đột Windows File Lock."""

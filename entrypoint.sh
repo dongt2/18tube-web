@@ -28,4 +28,4 @@ echo "=========================================================="
 echo " 🚀 KHỞI ĐỘNG 18TUBE CLOUD WEB SERVER TẠI CỔNG :$PORT"
 echo "=========================================================="
 
-exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 web_server:app
+exec gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 180 web_server:app

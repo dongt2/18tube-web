@@ -55,6 +55,22 @@ Truy cập: [https://botkeep.cloud/app/create](https://botkeep.cloud/app/create)
 
 ---
 
+## 🎉 TÍNH NĂNG ĐẶC BIỆT: TẢI TRỰC TIẾP LÊN DRIVE (ZERO LOCAL STORAGE)
+Bạn có thể ra lệnh cho Cloud tự tải toàn bộ Creator từ 18tube và đẩy thẳng vào Google Drive **mà không tốn 1 byte ổ cứng máy tính cá nhân**, thậm chí thao tác ngay trên điện thoại:
+
+### Cách dùng trên giao diện Web Cinema:
+1. Mở website: `https://<domain-của-bạn>/gallery`
+2. Bấm nút **"Tải lên Cloud Drive"** (màu xanh Cyan phát sáng ở góc phải thanh điều hướng).
+3. Dán các đường link Creator (mỗi dòng 1 link).
+4. Chọn chất lượng (Gốc/1080p, 720p, 480p) và bấm **"Bắt đầu tải lên Drive"**.
+5. Server Cloud sẽ tự động:
+   - Tải media tốc độ cao (băng thông Cloud hàng trăm Mbps).
+   - Đẩy thẳng lên Google Drive qua Rclone.
+   - Tự động xóa sạch file tạm sau khi đẩy xong (ổ đĩa Cloud và máy tính đều giữ mức 0 bytes).
+   - Tự động làm mới Gallery để bạn xem được ngay lập tức!
+
+---
+
 ## 🎉 KẾT QUẢ VÀ TRUY CẬP
 Sau khi ứng dụng deploy xong, bạn mở trình duyệt điện thoại/máy tính truy cập:
 👉 **`https://<domain-của-bạn>/gallery`**

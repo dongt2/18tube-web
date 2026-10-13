@@ -43,32 +43,15 @@ HEADERS = {
 }
 
 def create_optimized_session(pool_size=16):
-    """Tạo requests Session (ưu tiên curl_cffi impersonate Chrome để vượt Cloudflare TLS fingerprint trên Cloud/Colab, kế đến là cloudscraper)."""
-    try:
-        from curl_cffi import requests as cureq
-        session = cureq.Session(impersonate="chrome120")
-        session.headers.update(HEADERS)
-        return session
-    except Exception:
-        pass
-
-    try:
-        import cloudscraper
-        session = cloudscraper.create_scraper()
-    except Exception:
-        session = requests.Session()
-
-    try:
-        adapter = HTTPAdapter(
-            pool_connections=pool_size,
-            pool_maxsize=pool_size,
-            max_retries=3
-        )
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-    except Exception:
-        pass
-
+    """Tạo requests Session với Connection Pooling tái sử dụng socket TCP."""
+    session = requests.Session()
+    adapter = HTTPAdapter(
+        pool_connections=pool_size,
+        pool_maxsize=pool_size,
+        max_retries=3
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
     session.headers.update(HEADERS)
     return session
 
@@ -176,32 +159,7 @@ def fetch_creator_metadata(creator_slug):
         pass
     return meta
 
-def login_18tube(session, identifier, password):
-    """Đăng nhập vào 18tube.nl để lấy session cookie khi bị yêu cầu đăng nhập."""
-    try:
-        login_page = session.get("https://18tube.nl/login/", timeout=15)
-        soup = BeautifulSoup(login_page.text, "html.parser")
-        csrf_inp = soup.find("input", {"name": "csrf_token"})
-        if not csrf_inp:
-            return False, "Không tìm thấy csrf_token trên trang đăng nhập."
-        csrf_token = csrf_inp.get("value", "")
-
-        payload = {
-            "action": "site_custom_user_login",
-            "csrf_token": csrf_token,
-            "identifier": identifier,
-            "password": password,
-            "remember": "1"
-        }
-        resp = session.post("https://18tube.nl/wp-admin/admin-post.php", data=payload, timeout=15)
-        cookies = session.cookies.get_dict()
-        if any("logged_in" in k for k in cookies) or resp.status_code in [200, 302]:
-            return True, "Đăng nhập 18TUBE thành công!"
-        return False, "Đăng nhập thất bại, vui lòng kiểm tra tài khoản / mật khẩu."
-    except Exception as e:
-        return False, f"Lỗi đăng nhập: {e}"
-
-def collect_media_items(creator_slug, progress_callback=None, cancel_check=None, session=None, cookie=None, username=None, password=None):
+def collect_media_items(creator_slug, progress_callback=None, cancel_check=None):
     """Quét toàn bộ danh sách ảnh và video từ feed của creator."""
     base_url = f"https://18tube.nl/{creator_slug}"
     photos = []
@@ -209,14 +167,7 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None,
     seen_keys = set()
     page = 1
     
-    if session is None:
-        session = create_optimized_session(8)
-
-    if cookie:
-        session.headers["Cookie"] = cookie
-    if username and password:
-        ok, msg = login_18tube(session, username, password)
-        print(f"[*] {msg}")
+    session = create_optimized_session(8)
 
     while True:
         if cancel_check and cancel_check():
@@ -229,24 +180,13 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None,
                 break
             resp.raise_for_status()
         except Exception as e:
-            print(f"[!] Lỗi tải trang {page}: {e}")
+            if progress_callback:
+                progress_callback(f"[!] Lỗi tải trang {page}: {e}")
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
         items = soup.find_all("a", class_="light-gallery-item")
-        if not items:
-            items = soup.find_all(attrs={"data-media-key": True})
-
-        if page == 1 and len(items) == 0:
-            title = soup.title.string.strip() if (soup.title and soup.title.string) else "Không có tiêu đề"
-            if "đăng nhập" in title.lower() or "login" in title.lower():
-                warn_msg = f"[!] CẢNH BÁO: IP máy chủ yêu cầu ĐĂNG NHẬP để xem Creator ('{title}').\n    👉 Vui lòng điền tài khoản/mật khẩu hoặc Cookie vào cấu hình, hoặc tải trực tiếp trên máy tính gia đình."
-            elif "just a moment" in title.lower() or "cloudflare" in resp.text.lower() or "challenge" in resp.text.lower():
-                warn_msg = f"[!] CẢNH BÁO: Bị Cloudflare chặn trên IP máy chủ ('{title}'). Vui lòng sử dụng VPN/Proxy hoặc tải trên máy cá nhân."
-            else:
-                warn_msg = f"[!] Không tìm thấy mục media nào trên trang (HTTP {resp.status_code}, Tiêu đề: '{title}')."
-            print(warn_msg)
-
+        
         new_items = 0
         for a in items:
             key = a.get("data-media-key")
@@ -1435,6 +1375,125 @@ def upload_to_google_drive(local_dir, remote_name="gg", drive_folder="18TUBE", p
     except Exception as e:
         return False, str(e)
 
+def cloud_download_and_upload_creator(
+    creator_slug,
+    quality="best",
+    drive_remote="gg",
+    drive_folder="18TUBE",
+    auto_clean=True,
+    limit=0,
+    dl_photos=True,
+    dl_videos=True,
+    photo_threads=6,
+    video_threads=2,
+    progress_callback=None,
+    cancel_check=None,
+    log_callback=None
+):
+    """
+    Tiến trình độc lập tải Creator và đẩy trực tiếp lên Google Drive trên Cloud:
+    - Quét danh sách ảnh & video từ 18tube.nl
+    - Tải về thư mục đệm tạm thời
+    - Đẩy toàn bộ lên Google Drive qua Rclone
+    - Nếu auto_clean=True: Tự động xóa sạch thư mục đệm để không tốn 1 byte ổ cứng
+    """
+    def _log(msg):
+        if log_callback:
+            log_callback(msg)
+        else:
+            print(msg)
+
+    # 1. Quét danh sách media
+    _log(f"[*] Đang quét danh sách media của {creator_slug}...")
+    photos, videos = collect_media_items(
+        creator_slug,
+        progress_callback=lambda p_info: _log(f"  {p_info}"),
+        cancel_check=cancel_check
+    )
+
+    if cancel_check and cancel_check():
+        return False, "cancelled", {}
+
+    photos_to_dl = photos[:limit] if (limit > 0 and dl_photos) else (photos if dl_photos else [])
+    videos_to_dl = videos[:limit] if (limit > 0 and dl_videos) else (videos if dl_videos else [])
+
+    total_media = len(photos_to_dl) + len(videos_to_dl)
+    if total_media == 0:
+        return False, "Không có ảnh hoặc video nào để tải", {}
+
+    _log(f"[+] Đã quét xong: {len(photos_to_dl)} ảnh, {len(videos_to_dl)} video. Bắt đầu tải...")
+
+    # Thư mục đệm tạm thời
+    temp_creator_base = tempfile.mkdtemp(prefix=f"18tube_cloud_{creator_slug}_")
+    photos_dir = os.path.join(temp_creator_base, "photos")
+    videos_dir = os.path.join(temp_creator_base, "videos")
+
+    ffmpeg_exe = get_ffmpeg_path() if videos_to_dl else None
+    success_p = 0
+    success_v = 0
+    current_done = 0
+
+    try:
+        # Tải photos
+        if photos_to_dl and not (cancel_check and cancel_check()):
+            os.makedirs(photos_dir, exist_ok=True)
+            p_session = create_optimized_session(photo_threads * 2)
+            with ThreadPoolExecutor(max_workers=photo_threads) as executor:
+                futs = {executor.submit(download_photo, it, photos_dir, p_session, cancel_check=cancel_check): it for it in photos_to_dl}
+                for f in as_completed(futs):
+                    if cancel_check and cancel_check():
+                        break
+                    ok, _, _ = f.result()
+                    current_done += 1
+                    if ok:
+                        success_p += 1
+                    if progress_callback:
+                        progress_callback(current_done, total_media, f"Ảnh ({success_p}/{len(photos_to_dl)})")
+
+        # Tải videos
+        if videos_to_dl and not (cancel_check and cancel_check()):
+            os.makedirs(videos_dir, exist_ok=True)
+            v_session = create_optimized_session(video_threads * 4)
+            with ThreadPoolExecutor(max_workers=video_threads) as executor:
+                futs = {executor.submit(download_video, it, videos_dir, ffmpeg_exe, quality=quality, session=v_session, cancel_check=cancel_check): it for it in videos_to_dl}
+                for f in as_completed(futs):
+                    if cancel_check and cancel_check():
+                        break
+                    ok, _, _ = f.result()
+                    current_done += 1
+                    if ok:
+                        success_v += 1
+                    if progress_callback:
+                        progress_callback(current_done, total_media, f"Video ({success_v}/{len(videos_to_dl)})")
+
+        if cancel_check and cancel_check():
+            shutil.rmtree(temp_creator_base, ignore_errors=True)
+            return False, "cancelled", {}
+
+        _log(f"[✓] Tải đệm hoàn tất: {success_p} ảnh, {success_v} video. Bắt đầu đẩy lên Google Drive...")
+
+        # Đẩy lên Google Drive
+        drive_dest = f"{drive_folder}/{creator_slug}".strip("/")
+        ok_up, msg_up = upload_to_google_drive(
+            temp_creator_base,
+            remote_name=drive_remote,
+            drive_folder=drive_dest,
+            cancel_check=cancel_check,
+            log_callback=_log
+        )
+
+        return ok_up, msg_up, {
+            "slug": creator_slug,
+            "photos_count": success_p,
+            "videos_count": success_v,
+            "drive_dest": drive_dest
+        }
+
+    finally:
+        if auto_clean:
+            shutil.rmtree(temp_creator_base, ignore_errors=True)
+            _log(f"[🗑️] Đã dọn dẹp sạch toàn bộ bộ nhớ đệm tạm của {creator_slug}.")
+
 def main():
     parser = argparse.ArgumentParser(description="18TUBE Photos & Videos Downloader (Tốc độ cao)")
     parser.add_argument("--url", default="https://18tube.nl/vkcklananh9496/", help="URL trang creator (mặc định: vkcklananh9496)")
@@ -1447,11 +1506,9 @@ def main():
     parser.add_argument("--video-threads", type=int, default=2, help="Số luồng tải video song song (mặc định: 2)")
     parser.add_argument("--check", action="store_true", help="Kiểm tra xem đã tải đủ file hay chưa")
     parser.add_argument("--upload-drive", action="store_true", help="Tải thư mục lên Google Drive qua rclone")
+    parser.add_argument("--auto-clean", action="store_true", help="Tự động xóa thư mục cục bộ sau khi tải lên Google Drive thành công (tiết kiệm 100% dung lượng đĩa)")
     parser.add_argument("--drive-remote", default="gg", help="Tên remote rclone của Google Drive (mặc định: gg)")
     parser.add_argument("--drive-folder", default="18TUBE", help="Thư mục đích trên Google Drive (mặc định: 18TUBE)")
-    parser.add_argument("--cookie", help="Chuỗi Cookie đăng nhập 18tube (dùng khi server bắt đăng nhập)")
-    parser.add_argument("--user", help="Tên đăng nhập hoặc Email 18tube")
-    parser.add_argument("--password", help="Mật khẩu 18tube")
     parser.add_argument("--gui", action="store_true", help="Khởi động giao diện đồ họa (GUI)")
     args = parser.parse_args()
 
@@ -1504,20 +1561,10 @@ def main():
 
         print(f"[*] Đang quét danh sách media của creator: {creator_slug} ...")
         
-        def cli_progress(*args_cb):
-            if len(args_cb) == 4:
-                page, new_items, tot_p, tot_v = args_cb
-                print(f"  Trang {page}: tìm thấy {new_items} mục mới (Tổng: {tot_p} ảnh, {tot_v} video)")
-            elif len(args_cb) == 1:
-                print(f"  {args_cb[0]}")
+        def cli_progress(page, new_items, tot_p, tot_v):
+            print(f"  Trang {page}: tìm thấy {new_items} mục mới (Tổng: {tot_p} ảnh, {tot_v} video)")
 
-        photos, videos = collect_media_items(
-            creator_slug,
-            progress_callback=cli_progress,
-            cookie=args.cookie,
-            username=args.user,
-            password=args.password
-        )
+        photos, videos = collect_media_items(creator_slug, progress_callback=cli_progress)
         print(f"\n[+] Tổng kết phát hiện: {len(photos)} ảnh và {len(videos)} video.")
 
         base_out = os.path.join(args.out, creator_slug)
@@ -1605,6 +1652,9 @@ def main():
                 print()
                 if ok_up:
                     print(f"[✓] {msg_up}")
+                    if args.auto_clean:
+                        shutil.rmtree(base_out, ignore_errors=True)
+                        print(f"[🗑️] Đã tự động dọn dẹp sạch thư mục cục bộ của Creator: {creator_slug}")
                 else:
                     print(f"[!] {msg_up}")
 

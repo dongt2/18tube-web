@@ -43,19 +43,32 @@ HEADERS = {
 }
 
 def create_optimized_session(pool_size=16):
-    """Tạo requests Session (tích hợp cloudscraper nếu có để vượt Cloudflare) với Connection Pooling."""
+    """Tạo requests Session (ưu tiên curl_cffi impersonate Chrome để vượt Cloudflare TLS fingerprint trên Cloud/Colab, kế đến là cloudscraper)."""
+    try:
+        from curl_cffi import requests as cureq
+        session = cureq.Session(impersonate="chrome120")
+        session.headers.update(HEADERS)
+        return session
+    except Exception:
+        pass
+
     try:
         import cloudscraper
         session = cloudscraper.create_scraper()
     except Exception:
         session = requests.Session()
-    adapter = HTTPAdapter(
-        pool_connections=pool_size,
-        pool_maxsize=pool_size,
-        max_retries=3
-    )
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
+
+    try:
+        adapter = HTTPAdapter(
+            pool_connections=pool_size,
+            pool_maxsize=pool_size,
+            max_retries=3
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+    except Exception:
+        pass
+
     session.headers.update(HEADERS)
     return session
 
@@ -184,8 +197,7 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None)
                 break
             resp.raise_for_status()
         except Exception as e:
-            if progress_callback:
-                progress_callback(f"[!] Lỗi tải trang {page}: {e}")
+            print(f"[!] Lỗi tải trang {page}: {e}")
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -199,8 +211,7 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None)
                 warn_msg = f"[!] CẢNH BÁO: Bị Cloudflare chặn trên IP máy chủ ('{title}'). Vui lòng sử dụng VPN/Proxy hoặc tải trên máy cá nhân."
             else:
                 warn_msg = f"[!] Không tìm thấy mục media nào trên trang (HTTP {resp.status_code}, Tiêu đề: '{title}')."
-            if progress_callback:
-                progress_callback(warn_msg)
+            print(warn_msg)
 
         new_items = 0
         for a in items:
@@ -1456,8 +1467,12 @@ def main():
 
         print(f"[*] Đang quét danh sách media của creator: {creator_slug} ...")
         
-        def cli_progress(page, new_items, tot_p, tot_v):
-            print(f"  Trang {page}: tìm thấy {new_items} mục mới (Tổng: {tot_p} ảnh, {tot_v} video)")
+        def cli_progress(*args):
+            if len(args) == 4:
+                page, new_items, tot_p, tot_v = args
+                print(f"  Trang {page}: tìm thấy {new_items} mục mới (Tổng: {tot_p} ảnh, {tot_v} video)")
+            elif len(args) == 1:
+                print(f"  {args[0]}")
 
         photos, videos = collect_media_items(creator_slug, progress_callback=cli_progress)
         print(f"\n[+] Tổng kết phát hiện: {len(photos)} ảnh và {len(videos)} video.")

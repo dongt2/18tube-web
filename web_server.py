@@ -632,6 +632,67 @@ def index():
 def gallery():
     return render_template("gallery.html")
 
+@app.route("/api/drive/setup_config", methods=["POST"])
+def api_drive_setup_config():
+    """Lưu mã cấu hình Google Drive từ web UI để kích hoạt Drive ngay lập tức mà không cần restart."""
+    try:
+        data = request.get_json() or {}
+        raw_val = (data.get("config") or data.get("token") or "").strip()
+        if not raw_val:
+            return jsonify({"success": False, "error": "Vui lòng nhập chuỗi cấu hình hoặc Base64 token"}), 400
+
+        conf_content = ""
+        # 1. Thử giải mã Base64
+        try:
+            import base64
+            clean = "".join(raw_val.split())
+            decoded = base64.b64decode(clean.encode("ascii")).decode("utf-8")
+            if "[" in decoded and "]" in decoded:
+                conf_content = decoded
+        except Exception:
+            pass
+
+        # 2. Hoặc định dạng file rclone.conf trực tiếp
+        if not conf_content:
+            if "[" in raw_val and "]" in raw_val:
+                conf_content = raw_val
+            else:
+                return jsonify({"success": False, "error": "Định dạng token không hợp lệ. Vui lòng copy chuỗi từ export_config.bat"}), 400
+
+        # 3. Ghi file rclone.conf
+        target_dirs = [
+            os.path.expanduser("~/.config/rclone"),
+            "/tmp/rclone",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), ".rclone")
+        ]
+        conf_saved = False
+        saved_file = ""
+        for d in target_dirs:
+            try:
+                os.makedirs(d, exist_ok=True)
+                f_path = os.path.join(d, "rclone.conf")
+                with open(f_path, "w", encoding="utf-8") as f:
+                    f.write(conf_content)
+                os.environ["RCLONE_CONFIG"] = f_path
+                conf_saved = True
+                saved_file = f_path
+                break
+            except Exception:
+                continue
+
+        if not conf_saved:
+            return jsonify({"success": False, "error": "Không thể lưu file cấu hình rclone trên server"}), 500
+
+        # 4. Xóa cache cũ để làm mới dữ liệu
+        clear_cache()
+
+        # 5. Khởi động nạp trước cache trong nền
+        threading.Thread(target=_warmup_cache, daemon=True).start()
+
+        return jsonify({"success": True, "message": f"Đã kết nối Google Drive thành công tại {saved_file}!"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ----------------- ROUTES: DRIVE API -----------------
 
 @app.route("/api/drive/info")

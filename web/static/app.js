@@ -57,6 +57,8 @@
         driveQuotaFill: document.getElementById('drive-quota-fill'),
         driveQuotaText: document.getElementById('drive-quota-text'),
         driveQuotaPct: document.getElementById('drive-quota-pct'),
+        driveStatusCard: document.getElementById('drive-status-card'),
+        btnSetupDrive: document.getElementById('btn-setup-drive'),
         btnRefreshAll: document.getElementById('btn-refresh-all'),
         btnOpenDriveRoot: document.getElementById('btn-open-drive-root'),
         tabDriveCount: document.getElementById('tab-drive-count'),
@@ -1735,6 +1737,37 @@
         elements.verifyInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') runVerify();
         });
+
+        // Setup Drive Connection
+        async function promptDriveConnect() {
+            const token = prompt('🔑 Dán mã cấu hình Google Drive (chuỗi RCLONE_CONFIG_BASE64 từ export_config.bat):');
+            if (token && token.trim()) {
+                if (elements.driveStatusLabel) elements.driveStatusLabel.textContent = 'Đang kết nối Drive...';
+                if (elements.driveDot) elements.driveDot.style.background = 'var(--accent-amber)';
+                try {
+                    const r = await fetch('/api/drive/setup_config', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({token: token.trim()})
+                    });
+                    const data = await r.json();
+                    if (data.success) {
+                        alert('🎉 ' + (data.message || 'Kết nối Google Drive thành công!'));
+                        window.location.reload();
+                    } else {
+                        alert('❌ Lỗi: ' + (data.error || 'Không thể kết nối Drive'));
+                    }
+                } catch (e) {
+                    alert('❌ Lỗi kết nối: ' + e);
+                }
+            }
+        }
+        if (elements.btnSetupDrive) elements.btnSetupDrive.addEventListener('click', promptDriveConnect);
+        if (elements.driveStatusCard) {
+            elements.driveStatusCard.style.cursor = 'pointer';
+            elements.driveStatusCard.title = 'Nhấn để kết nối hoặc cập nhật tài khoản Google Drive';
+            elements.driveStatusCard.addEventListener('click', promptDriveConnect);
+        }
     }
 
     // ==========================================

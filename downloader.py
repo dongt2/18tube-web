@@ -43,8 +43,12 @@ HEADERS = {
 }
 
 def create_optimized_session(pool_size=16):
-    """Tạo requests Session với Connection Pooling tái sử dụng socket TCP."""
-    session = requests.Session()
+    """Tạo requests Session (tích hợp cloudscraper nếu có để vượt Cloudflare) với Connection Pooling."""
+    try:
+        import cloudscraper
+        session = cloudscraper.create_scraper()
+    except Exception:
+        session = requests.Session()
     adapter = HTTPAdapter(
         pool_connections=pool_size,
         pool_maxsize=pool_size,
@@ -186,7 +190,18 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None)
 
         soup = BeautifulSoup(resp.text, "html.parser")
         items = soup.find_all("a", class_="light-gallery-item")
-        
+        if not items:
+            items = soup.find_all(attrs={"data-media-key": True})
+
+        if page == 1 and len(items) == 0:
+            title = soup.title.string.strip() if (soup.title and soup.title.string) else "Không có tiêu đề"
+            if "just a moment" in title.lower() or "cloudflare" in resp.text.lower() or "challenge" in resp.text.lower():
+                warn_msg = f"[!] CẢNH BÁO: Bị Cloudflare chặn trên IP máy chủ ('{title}'). Vui lòng sử dụng VPN/Proxy hoặc tải trên máy cá nhân."
+            else:
+                warn_msg = f"[!] Không tìm thấy mục media nào trên trang (HTTP {resp.status_code}, Tiêu đề: '{title}')."
+            if progress_callback:
+                progress_callback(warn_msg)
+
         new_items = 0
         for a in items:
             key = a.get("data-media-key")

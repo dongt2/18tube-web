@@ -1775,7 +1775,9 @@ def _run_cloud_download_worker(slugs, quality, drive_folder, auto_clean):
             def prog_cb(done, tot, label):
                 with _cloud_dl_lock:
                     sub_pct = int((done / tot) * 100) if tot > 0 else 0
+                    overall_pct = int(((idx - 1) + (done / tot if tot > 0 else 0)) / len(slugs) * 100)
                     _cloud_dl_state["current_step"] = f"[{idx}/{len(slugs)}] {slug}: {label} ({sub_pct}%)"
+                    _cloud_dl_state["progress_pct"] = min(99, overall_pct)
 
             ok, msg, info = downloader.cloud_download_and_upload_creator(
                 slug,

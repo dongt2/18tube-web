@@ -112,9 +112,9 @@ def get_ffmpeg_path():
     return None
 
 def extract_creator_slug(url):
-    """Trích xuất tên creator từ URL."""
+    """Trích xuất tên creator từ URL hoặc chuỗi slug."""
     clean = url.strip()
-    m = re.search(r"18tube\.nl/([^/?#]+)", clean)
+    m = re.search(r"18tube\.[a-z0-9]+/(?:creator/)?([^/?#]+)", clean, re.IGNORECASE)
     if m:
         return m.group(1).lstrip("@")
     parts = [p for p in clean.replace("\\", "/").split("/") if p]
@@ -181,7 +181,13 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None)
             resp.raise_for_status()
         except Exception as e:
             if progress_callback:
-                progress_callback(f"[!] Lỗi tải trang {page}: {e}")
+                try:
+                    progress_callback(page, 0, len(photos), len(videos))
+                except TypeError:
+                    try:
+                        progress_callback(f"[!] Lỗi tải trang {page}: {e}")
+                    except Exception:
+                        pass
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -213,7 +219,13 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None)
                 new_items += 1
 
         if progress_callback:
-            progress_callback(page, new_items, len(photos), len(videos))
+            try:
+                progress_callback(page, new_items, len(photos), len(videos))
+            except TypeError:
+                try:
+                    progress_callback(f"Trang {page}: +{new_items} mục (Tổng: {len(photos)} ảnh, {len(videos)} video)")
+                except Exception:
+                    pass
 
         if new_items == 0:
             break
@@ -1405,9 +1417,12 @@ def cloud_download_and_upload_creator(
 
     # 1. Quét danh sách media
     _log(f"[*] Đang quét danh sách media của {creator_slug}...")
+    def _scan_cb(page, new_items=0, tot_p=0, tot_v=0):
+        _log(f"  -> Quét trang {page}: tìm thấy {new_items} mục mới (Tổng: {tot_p} ảnh, {tot_v} video)")
+
     photos, videos = collect_media_items(
         creator_slug,
-        progress_callback=lambda p_info: _log(f"  {p_info}"),
+        progress_callback=_scan_cb,
         cancel_check=cancel_check
     )
 
@@ -1474,10 +1489,15 @@ def cloud_download_and_upload_creator(
 
         # Đẩy lên Google Drive
         drive_dest = f"{drive_folder}/{creator_slug}".strip("/")
+        def _up_prog_cb(pct, spd, tf, eta, f_info):
+            if progress_callback:
+                progress_callback(total_media, total_media, f"Đang đẩy lên Drive ({pct}%, {spd})")
+
         ok_up, msg_up = upload_to_google_drive(
             temp_creator_base,
             remote_name=drive_remote,
             drive_folder=drive_dest,
+            progress_callback=_up_prog_cb,
             cancel_check=cancel_check,
             log_callback=_log
         )

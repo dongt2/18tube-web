@@ -114,7 +114,7 @@ class DownloadWorker(QThread):
     log = pyqtSignal(str)
     overall_progress = pyqtSignal(int, int, str) # current_count, total_count, item_name
     slot_started = pyqtSignal(int, str, str) # slot_id (1-based), filename, type_str
-    slot_progress = pyqtSignal(int, int, int, float, int) # slot_id, bytes_done, total_bytes, speed, pct
+    slot_progress = pyqtSignal(int, int, int, float, int, str) # slot_id, bytes_done, total_bytes, speed, pct, status_str
     slot_finished = pyqtSignal(int, str) # slot_id, status_str
     total_speed_update = pyqtSignal(float, int) # total_speed, total_bytes_done
     finished = pyqtSignal(int, int, int, int) # success_p, total_p, success_v, total_v
@@ -133,6 +133,7 @@ class DownloadWorker(QThread):
         self.video_threads = max(1, video_threads)
         self.is_cancelled = False
         self.active_speeds = {}
+        self.active_bytes = {}
         self.total_downloaded_bytes = 0
 
     def cancel(self):
@@ -190,10 +191,15 @@ class DownloadWorker(QThread):
                         fname = f"{item['key']}{ext}"
                         self.slot_started.emit(slot_id, fname, "🖼️ Ảnh")
 
-                        def prog_cb(b_done, b_tot, spd, pct):
+                        def prog_cb(b_done, b_tot, spd, pct, status_str=None):
+                            clean_b = max(0, b_done)
                             self.active_speeds[slot_id] = spd
-                            self.slot_progress.emit(slot_id, b_done, b_tot, spd, pct)
-                            self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes + b_done)
+                            self.active_bytes[slot_id] = clean_b
+                            st = status_str if status_str else f"{pct}%"
+                            self.slot_progress.emit(slot_id, clean_b, b_tot, spd, pct, st)
+                            tot_spd = sum(self.active_speeds.values())
+                            tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                            self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
 
                         res = downloader.download_photo(
                             item, photos_dir, session,
@@ -207,7 +213,10 @@ class DownloadWorker(QThread):
                         return res
                     finally:
                         self.active_speeds.pop(slot_id, None)
-                        self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes)
+                        self.active_bytes.pop(slot_id, None)
+                        tot_spd = sum(self.active_speeds.values())
+                        tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                        self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
                         slot_q.put(slot_id)
 
                 with ThreadPoolExecutor(max_workers=self.photo_threads) as executor:
@@ -222,7 +231,7 @@ class DownloadWorker(QThread):
                             fname = os.path.basename(filepath)
                             tag = "[Đã có]" if reason == "already_exists" else "[Thành công]"
                             self.log.emit(f"  {tag} Ảnh: {fname}")
-                            if os.path.exists(filepath):
+                            if reason != "already_exists" and os.path.exists(filepath):
                                 self.total_downloaded_bytes += os.path.getsize(filepath)
                         self.overall_progress.emit(current_done, total_items, f"Ảnh ({success_photos}/{len(photos_to_dl)})")
 
@@ -234,6 +243,7 @@ class DownloadWorker(QThread):
             if videos_to_dl and not self.is_cancelled:
                 q_label = self.quality.upper() if self.quality != "best" else "Cao nhất (720p HD)"
                 self.log.emit(f"[*] Bắt đầu tải {len(videos_to_dl)} video [Độ phân giải: {q_label}] với {self.video_threads} luồng song song...")
+                video_session = downloader.create_optimized_session(self.video_threads * 4)
 
                 slot_q = queue.Queue()
                 for s in range(1, self.video_threads + 1):
@@ -247,14 +257,20 @@ class DownloadWorker(QThread):
                         fname = f"{item['key']}.mp4"
                         self.slot_started.emit(slot_id, fname, "🎬 Video")
 
-                        def prog_cb(b_done, b_tot, spd, pct):
+                        def prog_cb(b_done, b_tot, spd, pct, status_str=None):
+                            clean_b = max(0, b_done)
                             self.active_speeds[slot_id] = spd
-                            self.slot_progress.emit(slot_id, b_done, b_tot, spd, pct)
-                            self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes + b_done)
+                            self.active_bytes[slot_id] = clean_b
+                            st = status_str if status_str else f"{pct}%"
+                            self.slot_progress.emit(slot_id, clean_b, b_tot, spd, pct, st)
+                            tot_spd = sum(self.active_speeds.values())
+                            tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                            self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
 
                         res = downloader.download_video(
                             item, videos_dir, ffmpeg_exe,
                             quality=self.quality,
+                            session=video_session,
                             progress_callback=prog_cb,
                             cancel_check=lambda: self.is_cancelled
                         )
@@ -265,7 +281,10 @@ class DownloadWorker(QThread):
                         return res
                     finally:
                         self.active_speeds.pop(slot_id, None)
-                        self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes)
+                        self.active_bytes.pop(slot_id, None)
+                        tot_spd = sum(self.active_speeds.values())
+                        tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                        self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
                         slot_q.put(slot_id)
 
                 with ThreadPoolExecutor(max_workers=self.video_threads) as executor:
@@ -280,7 +299,7 @@ class DownloadWorker(QThread):
                             fname = os.path.basename(filepath)
                             tag = "[Đã có]" if reason == "already_exists" else "[Thành công]"
                             self.log.emit(f"  {tag} Video ({self.quality}): {fname}")
-                            if os.path.exists(filepath):
+                            if reason != "already_exists" and os.path.exists(filepath):
                                 self.total_downloaded_bytes += os.path.getsize(filepath)
                         self.overall_progress.emit(current_done, total_items, f"Video ({success_videos}/{len(videos_to_dl)})")
 
@@ -304,7 +323,7 @@ class BatchDownloadWorker(QThread):
     batch_status = pyqtSignal(int, int, str, str) # cur_idx (1-based), total, slug, status_text
     overall_progress = pyqtSignal(int, int, str)
     slot_started = pyqtSignal(int, str, str)
-    slot_progress = pyqtSignal(int, int, int, float, int)
+    slot_progress = pyqtSignal(int, int, int, float, int, str)
     slot_finished = pyqtSignal(int, str)
     total_speed_update = pyqtSignal(float, int)
     drive_progress = pyqtSignal(int, str, str, str, str) # pct, speed, transferred, eta, files
@@ -326,6 +345,7 @@ class BatchDownloadWorker(QThread):
         self.drive_folder = drive_folder
         self.is_cancelled = False
         self.active_speeds = {}
+        self.active_bytes = {}
         self.total_downloaded_bytes = 0
 
     def cancel(self):
@@ -419,10 +439,15 @@ class BatchDownloadWorker(QThread):
                             fname = f"{item['key']}{ext}"
                             self.slot_started.emit(slot_id, fname, "🖼️ Ảnh")
 
-                            def p_cb(b_done, b_tot, spd, pct):
+                            def p_cb(b_done, b_tot, spd, pct, status_str=None):
+                                clean_b = max(0, b_done)
                                 self.active_speeds[slot_id] = spd
-                                self.slot_progress.emit(slot_id, b_done, b_tot, spd, pct)
-                                self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes + b_done)
+                                self.active_bytes[slot_id] = clean_b
+                                st = status_str if status_str else f"{pct}%"
+                                self.slot_progress.emit(slot_id, clean_b, b_tot, spd, pct, st)
+                                tot_spd = sum(self.active_speeds.values())
+                                tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                                self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
 
                             res = downloader.download_photo(
                                 item, photos_dir, session,
@@ -436,7 +461,10 @@ class BatchDownloadWorker(QThread):
                             return res
                         finally:
                             self.active_speeds.pop(slot_id, None)
-                            self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes)
+                            self.active_bytes.pop(slot_id, None)
+                            tot_spd = sum(self.active_speeds.values())
+                            tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                            self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
                             slot_q.put(slot_id)
 
                     with ThreadPoolExecutor(max_workers=self.photo_threads) as executor:
@@ -448,7 +476,7 @@ class BatchDownloadWorker(QThread):
                             c_done += 1
                             if ok:
                                 c_succ_p += 1
-                                if os.path.exists(fpath):
+                                if reason != "already_exists" and os.path.exists(fpath):
                                     self.total_downloaded_bytes += os.path.getsize(fpath)
                             self.overall_progress.emit(c_done, tot_media, f"[{slug}] Ảnh ({c_succ_p}/{len(photos_to_dl)})")
 
@@ -458,6 +486,7 @@ class BatchDownloadWorker(QThread):
 
                 # Tải Videos đa luồng
                 if videos_to_dl and not self.is_cancelled:
+                    video_session = downloader.create_optimized_session(self.video_threads * 4)
                     slot_q = queue.Queue()
                     for s in range(1, self.video_threads + 1):
                         slot_q.put(s)
@@ -470,14 +499,20 @@ class BatchDownloadWorker(QThread):
                             fname = f"{item['key']}.mp4"
                             self.slot_started.emit(slot_id, fname, "🎬 Video")
 
-                            def v_cb(b_done, b_tot, spd, pct):
+                            def v_cb(b_done, b_tot, spd, pct, status_str=None):
+                                clean_b = max(0, b_done)
                                 self.active_speeds[slot_id] = spd
-                                self.slot_progress.emit(slot_id, b_done, b_tot, spd, pct)
-                                self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes + b_done)
+                                self.active_bytes[slot_id] = clean_b
+                                st = status_str if status_str else f"{pct}%"
+                                self.slot_progress.emit(slot_id, clean_b, b_tot, spd, pct, st)
+                                tot_spd = sum(self.active_speeds.values())
+                                tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                                self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
 
                             res = downloader.download_video(
                                 item, videos_dir, ffmpeg_exe,
                                 quality=self.quality,
+                                session=video_session,
                                 progress_callback=v_cb,
                                 cancel_check=lambda: self.is_cancelled
                             )
@@ -488,7 +523,10 @@ class BatchDownloadWorker(QThread):
                             return res
                         finally:
                             self.active_speeds.pop(slot_id, None)
-                            self.total_speed_update.emit(sum(self.active_speeds.values()), self.total_downloaded_bytes)
+                            self.active_bytes.pop(slot_id, None)
+                            tot_spd = sum(self.active_speeds.values())
+                            tot_bytes = self.total_downloaded_bytes + sum(self.active_bytes.values())
+                            self.total_speed_update.emit(tot_spd, max(0, tot_bytes))
                             slot_q.put(slot_id)
 
                     with ThreadPoolExecutor(max_workers=self.video_threads) as executor:
@@ -500,7 +538,7 @@ class BatchDownloadWorker(QThread):
                             c_done += 1
                             if ok:
                                 c_succ_v += 1
-                                if os.path.exists(fpath):
+                                if reason != "already_exists" and os.path.exists(fpath):
                                     self.total_downloaded_bytes += os.path.getsize(fpath)
                             self.overall_progress.emit(c_done, tot_media, f"[{slug}] Video ({c_succ_v}/{len(videos_to_dl)})")
 
@@ -1640,7 +1678,7 @@ class MainWindow(QMainWindow):
             self.table_threads.item(row, 5).setText("0 B/s")
             self.table_threads.item(row, 6).setText("Đang tải...")
 
-    def on_slot_progress(self, slot_id, bytes_done, total_bytes, speed, pct):
+    def on_slot_progress(self, slot_id, bytes_done, total_bytes, speed, pct, status_str=""):
         row = slot_id - 1
         if row < self.table_threads.rowCount():
             pbar = self.table_threads.cellWidget(row, 3)
@@ -1648,11 +1686,16 @@ class MainWindow(QMainWindow):
                 pbar.setValue(pct)
                 pbar.setFormat(f"{pct}%")
             
-            done_s = downloader.format_size(bytes_done)
+            clean_bytes = max(0, bytes_done)
+            done_s = downloader.format_size(clean_bytes)
             tot_s = downloader.format_size(total_bytes) if total_bytes > 0 else "? MB"
             self.table_threads.item(row, 4).setText(f"{done_s} / {tot_s}")
-            self.table_threads.item(row, 5).setText(downloader.format_speed(speed))
-            self.table_threads.item(row, 6).setText(f"{pct}%")
+            
+            spd_text = downloader.format_speed(speed)
+            if status_str in ["Đang ghép nối...", "Đang đóng gói MP4...", "Đang tải bù segment..."]:
+                spd_text = "Xử lý..."
+            self.table_threads.item(row, 5).setText(spd_text)
+            self.table_threads.item(row, 6).setText(status_str if status_str else f"{pct}%")
 
     def on_slot_finished(self, slot_id, status_str):
         row = slot_id - 1

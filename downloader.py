@@ -16,6 +16,7 @@ import time
 import argparse
 import subprocess
 import shutil
+import tempfile
 import requests
 import urllib.request
 import urllib.parse
@@ -428,34 +429,38 @@ def strip_segment_padding(data: bytes) -> bytes:
     # 1. Trường hợp ngụy trang bằng ảnh JPEG: bắt đầu bằng \xff\xd8
     if data.startswith(b'\xff\xd8'):
         eoi = data.find(b'\xff\xd9')
-        if eoi != -1 and eoi < 4096:
+        if eoi != -1 and eoi < 65536:
             candidate = data[eoi + 2:]
             sync_pos = candidate.find(b'\x47')
-            if sync_pos != -1 and sync_pos < 64:
+            if sync_pos != -1 and sync_pos < 188:
                 return candidate[sync_pos:]
             return candidate
 
     # 2. Trường hợp ngụy trang bằng PNG: bắt đầu bằng \x89PNG
     if data.startswith(b'\x89PNG'):
         iend = data.find(b'IEND')
-        if iend != -1 and iend < 4096:
+        if iend != -1 and iend < 65536:
             candidate = data[iend + 8:]
             sync_pos = candidate.find(b'\x47')
-            if sync_pos != -1 and sync_pos < 64:
+            if sync_pos != -1 and sync_pos < 188:
                 return candidate[sync_pos:]
             return candidate
 
     # 3. Trường hợp ngụy trang bằng WebP/RIFF
     if data.startswith(b'RIFF') and b'WEBP' in data[:16]:
         sync_pos = data.find(b'\x47')
-        if sync_pos != -1 and sync_pos < 4096:
+        if sync_pos != -1 and sync_pos < 65536:
             return data[sync_pos:]
 
     # 4. Kiểm tra tổng quát: nếu không bắt đầu bằng sync byte 0x47 nhưng có 0x47 gần đầu
-    if not data.startswith(b'\x47') and not data.startswith(b'\x00\x00\x00') and b'\x47' in data[:4096]:
-        sync_pos = data.find(b'\x47')
-        if sync_pos != -1:
-            return data[sync_pos:]
+    if not data.startswith(b'\x47') and not data.startswith(b'\x00\x00\x00'):
+        limit = min(len(data), 65536)
+        for offset in range(limit):
+            if data[offset] == 0x47:
+                if offset + 188 < len(data) and data[offset + 188] == 0x47:
+                    return data[offset:]
+                elif offset < 1024:
+                    return data[offset:]
 
     return data
 
@@ -463,11 +468,20 @@ def download_masked_hls(playlist_url, filepath, ffmpeg_exe, session=None, progre
     """
     Tải và ghép các segment HLS bị ngụy trang (steganography / masked JPEG/PNG):
     - Tải song song đa luồng các segment với cơ chế tự động thử lại (auto-retry).
+    - Lưu segment tạm thời trên ổ cứng cục bộ siêu tốc (Local SSD/Temp) thay vì ổ mạng/USB để tối ưu I/O.
     - Tách bỏ hoàn toàn lớp vỏ ngụy trang ảnh để lấy dòng MPEG-TS gốc.
-    - Ghép nối tuần tự chính xác và chuyển đổi sang container MP4 chất lượng gốc qua FFmpeg.
+    - Ghép nối tuần tự chính xác với buffer 1MB và chuyển đổi sang container MP4 chất lượng gốc qua FFmpeg.
+    - Báo cáo trạng thái trực quan: Tải segment -> Đang ghép nối... -> Đang đóng gói MP4...
     """
     if not session:
-        session = create_optimized_session(8)
+        session = create_optimized_session(12)
+
+    def _report(d, t, spd, pct, status_str=None):
+        if progress_callback:
+            try:
+                progress_callback(d, t, spd, pct, status_str)
+            except TypeError:
+                progress_callback(d, t, spd, pct)
 
     try:
         req = urllib.request.Request(playlist_url, headers=HEADERS)
@@ -486,35 +500,43 @@ def download_masked_hls(playlist_url, filepath, ffmpeg_exe, session=None, progre
     durations = [float(d) for d in re.findall(r"#EXTINF:([0-9.]+),", playlist_text)]
     total_dur = sum(durations) if durations else None
 
-    temp_dir = filepath + "_temp_segs"
+    # Sử dụng thư mục tạm trên ổ cứng cục bộ (Local Temp SSD)
+    # Tránh nghẽn I/O khi lưu trữ trên ổ mạng (SMB / NAS / Z:) hoặc ổ USB gắn ngoài
+    local_temp_base = tempfile.mkdtemp(prefix="18tube_hls_")
+    temp_dir = os.path.join(local_temp_base, "segs")
     os.makedirs(temp_dir, exist_ok=True)
-    temp_ts = filepath + "_temp.ts"
+    temp_ts = os.path.join(local_temp_base, "merged.ts")
 
     total_downloaded = 0
     completed_segs = 0
     last_time = time.time()
     last_bytes = 0
 
-    def dl_seg(idx, seg_url):
+    def dl_seg(idx, seg_url, max_retries=3):
         if cancel_check and cancel_check():
             return None
-        for retry in range(3):
+        part_path = os.path.join(temp_dir, f"seg_{idx:05d}.ts")
+        if os.path.exists(part_path) and os.path.getsize(part_path) > 0:
+            return idx, os.path.getsize(part_path)
+
+        for retry in range(max_retries):
             if cancel_check and cancel_check():
                 return None
             try:
                 r = session.get(seg_url, timeout=20)
                 if r.status_code == 200 and len(r.content) > 0:
                     clean = strip_segment_padding(r.content)
-                    part_path = os.path.join(temp_dir, f"seg_{idx:05d}.ts")
                     with open(part_path, "wb") as f:
                         f.write(clean)
                     return idx, len(clean)
             except Exception:
-                time.sleep(1)
+                time.sleep(0.5 * (retry + 1))
         return None
 
     try:
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        # Số luồng tải segment cân bằng tối ưu cho từng file
+        seg_workers = min(6, max(3, total_segs))
+        with ThreadPoolExecutor(max_workers=seg_workers) as executor:
             futs = {executor.submit(dl_seg, i, u): i for i, u in enumerate(seg_urls)}
             for f in as_completed(futs):
                 if cancel_check and cancel_check():
@@ -526,50 +548,83 @@ def download_masked_hls(playlist_url, filepath, ffmpeg_exe, session=None, progre
                     total_downloaded += size
                     now = time.time()
                     dt = now - last_time
-                    if dt >= 0.2 and progress_callback:
+                    if dt >= 0.2:
                         speed = (total_downloaded - last_bytes) / dt if dt > 0 else 0.0
                         last_time = now
                         last_bytes = total_downloaded
-                        pct = int((completed_segs / total_segs) * 95)
+                        pct = int((completed_segs / total_segs) * 94)
                         est_tot = int((total_downloaded / completed_segs) * total_segs) if completed_segs > 0 else 0
-                        progress_callback(total_downloaded, est_tot, speed, pct)
+                        _report(total_downloaded, est_tot, speed, pct, f"{pct}%")
 
         if cancel_check and cancel_check():
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            return False, "cancelled"
+
+        # Vòng kiểm tra và tải bù nếu có segment bị sót do mạng chập chờn
+        if completed_segs < total_segs and not (cancel_check and cancel_check()):
+            missing_indices = [i for i in range(total_segs) if not os.path.exists(os.path.join(temp_dir, f"seg_{i:05d}.ts"))]
+            if missing_indices and len(missing_indices) <= max(5, int(total_segs * 0.25)):
+                _report(total_downloaded, total_downloaded, 0.0, 94, "Đang tải bù segment...")
+                for mi in missing_indices:
+                    if cancel_check and cancel_check():
+                        break
+                    res = dl_seg(mi, seg_urls[mi], max_retries=4)
+                    if res:
+                        completed_segs += 1
+                        total_downloaded += res[1]
+
+        if cancel_check and cancel_check():
             return False, "cancelled"
 
         if completed_segs < total_segs:
-            shutil.rmtree(temp_dir, ignore_errors=True)
             return False, "incomplete_segments"
 
-        # Ghép nối các file TS theo đúng thứ tự
+        # Ghép nối các file TS trên ổ cứng cục bộ (buffer 1MB siêu tốc)
+        _report(total_downloaded, total_downloaded, 0.0, 95, "Đang ghép nối...")
         with open(temp_ts, "wb") as out_ts:
             for idx in range(total_segs):
                 p_file = os.path.join(temp_dir, f"seg_{idx:05d}.ts")
                 if os.path.exists(p_file):
                     with open(p_file, "rb") as in_f:
-                        shutil.copyfileobj(in_f, out_ts)
+                        shutil.copyfileobj(in_f, out_ts, length=1048576)
 
+        # Giải phóng thư mục segments con ngay khi ghép xong để tiết kiệm dung lượng đĩa
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+        if cancel_check and cancel_check():
+            return False, "cancelled"
+
         # Chuyển đổi và đóng gói sang MP4 chất lượng gốc bằng FFmpeg
+        _report(total_downloaded, total_downloaded, 0.0, 98, "Đang đóng gói MP4...")
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
         cmd = [
             ffmpeg_exe,
+            "-nostdin",
+            "-loglevel", "warning",
             "-i", temp_ts,
             "-c", "copy",
             "-bsf:a", "aac_adtstoasc",
             "-y",
             filepath
         ]
-        p = subprocess.run(cmd, capture_output=True, text=True, **SUBPROCESS_EXTRA)
-        if os.path.exists(temp_ts):
-            try: os.remove(temp_ts)
-            except OSError: pass
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=180, **SUBPROCESS_EXTRA)
+
+        # Nếu lỗi (ví dụ không có luồng audio AAC), thử lại không dùng filter bsf
+        if p.returncode != 0 and not (cancel_check and cancel_check()):
+            cmd_no_bsf = [
+                ffmpeg_exe,
+                "-nostdin",
+                "-loglevel", "warning",
+                "-i", temp_ts,
+                "-c", "copy",
+                "-y",
+                filepath
+            ]
+            p = subprocess.run(cmd_no_bsf, capture_output=True, text=True, timeout=180, **SUBPROCESS_EXTRA)
 
         if p.returncode == 0 and os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
-            if progress_callback:
-                sz = os.path.getsize(filepath)
-                progress_callback(sz, sz, 0, 100)
+            sz = os.path.getsize(filepath)
+            _report(sz, sz, 0.0, 100, "Hoàn tất")
             return True, "downloaded"
         else:
             if os.path.exists(filepath):
@@ -583,10 +638,7 @@ def download_masked_hls(playlist_url, filepath, ffmpeg_exe, session=None, progre
             except OSError: pass
         return False, str(e)
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        if os.path.exists(temp_ts):
-            try: os.remove(temp_ts)
-            except OSError: pass
+        shutil.rmtree(local_temp_base, ignore_errors=True)
 
 def inspect_and_resolve_video_streams(url, quality="best"):
     """
@@ -705,8 +757,11 @@ def build_ffmpeg_cmd(ffmpeg_exe, vid_url, aud_url, filepath, header_arg):
     """Tạo danh sách đối số dòng lệnh cho ffmpeg với hỗ trợ tách luồng hoặc đơn luồng."""
     cmd = [
         ffmpeg_exe,
+        "-nostdin",
+        "-loglevel", "warning",
         "-headers", header_arg,
         "-http_persistent", "1",
+        "-rw_timeout", "15000000",
         "-reconnect", "1",
         "-reconnect_streamed", "1",
         "-reconnect_delay_max", "5",
@@ -719,6 +774,7 @@ def build_ffmpeg_cmd(ffmpeg_exe, vid_url, aud_url, filepath, header_arg):
         cmd.extend([
             "-headers", header_arg,
             "-http_persistent", "1",
+            "-rw_timeout", "15000000",
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
@@ -740,7 +796,14 @@ def build_ffmpeg_cmd(ffmpeg_exe, vid_url, aud_url, filepath, header_arg):
     return cmd
 
 def _execute_ffmpeg_proc(cmd, filepath, total_duration=None, progress_callback=None, cancel_check=None):
-    """Thực thi tiến trình ffmpeg và cập nhật tiến độ."""
+    """Thực thi tiến trình ffmpeg và cập nhật tiến độ an toàn với watchdog timeout chống treo."""
+    def _report(d, t, spd, pct, status_str=None):
+        if progress_callback:
+            try:
+                progress_callback(d, t, spd, pct, status_str)
+            except TypeError:
+                progress_callback(d, t, spd, pct)
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -754,6 +817,7 @@ def _execute_ffmpeg_proc(cmd, filepath, total_duration=None, progress_callback=N
         curr_bytes = 0
         last_bytes = 0
         last_time = time.time()
+        last_data_time = time.time()
         speed = 0.0
         pct = 0.0
         out_s = 0.0
@@ -763,31 +827,41 @@ def _execute_ffmpeg_proc(cmd, filepath, total_duration=None, progress_callback=N
                 proc.kill()
                 break
 
+            now = time.time()
+            if now - last_data_time > 60.0:
+                # Quá 60 giây không có dữ liệu tiến độ mới -> tiến trình có thể đã bị treo
+                proc.kill()
+                break
+
             line = line.strip()
             if line.startswith("total_size="):
                 try:
-                    curr_bytes = int(line.split("=")[1])
-                    now = time.time()
-                    dt = now - last_time
-                    if dt >= 0.2:
-                        speed = (curr_bytes - last_bytes) / dt if dt > 0 else 0.0
-                        last_time = now
-                        last_bytes = curr_bytes
-                        if progress_callback:
+                    val = int(line.split("=")[1])
+                    if val >= 0:
+                        curr_bytes = val
+                        last_data_time = now
+                        dt = now - last_time
+                        if dt >= 0.2:
+                            speed = (curr_bytes - last_bytes) / dt if dt > 0 else 0.0
+                            last_time = now
+                            last_bytes = curr_bytes
                             est_total = int((curr_bytes / (pct / 100))) if pct > 1 else 0
-                            progress_callback(curr_bytes, est_total, speed, int(pct))
+                            _report(curr_bytes, est_total, speed, int(pct), f"{int(pct)}%")
                 except Exception:
                     pass
             elif line.startswith("out_time="):
                 t_str = line.split("=")[1]
                 out_s = parse_time_str(t_str)
+                last_data_time = now
                 if total_duration and total_duration > 0:
                     pct = min(100.0, (out_s / total_duration) * 100)
-                    if progress_callback:
-                        est_total = int((curr_bytes / (pct / 100))) if pct > 1 else 0
-                        progress_callback(curr_bytes, est_total, speed, int(pct))
+                    est_total = int((curr_bytes / (pct / 100))) if pct > 1 else 0
+                    _report(curr_bytes, est_total, speed, int(pct), f"{int(pct)}%")
 
-        proc.wait()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
         if cancel_check and cancel_check():
             if os.path.exists(filepath):
@@ -796,9 +870,8 @@ def _execute_ffmpeg_proc(cmd, filepath, total_duration=None, progress_callback=N
             return False, "cancelled"
 
         if proc.returncode == 0 and os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
-            if progress_callback:
-                final_sz = os.path.getsize(filepath)
-                progress_callback(final_sz, final_sz, 0, 100)
+            final_sz = os.path.getsize(filepath)
+            _report(final_sz, final_sz, 0.0, 100, "Hoàn tất")
             return True, "downloaded"
         else:
             if os.path.exists(filepath):
@@ -812,10 +885,10 @@ def _execute_ffmpeg_proc(cmd, filepath, total_duration=None, progress_callback=N
             except OSError: pass
         return False, str(e)
 
-def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=None, cancel_check=None):
+def download_video(item, out_dir, ffmpeg_exe, quality="best", session=None, progress_callback=None, cancel_check=None):
     """
     Tải 1 video HLS m3u8 bằng ffmpeg với cơ chế thích ứng tự động:
-    - Nếu là Masked HLS Stream (như Ain Nguyen): giải mã và tải trực tiếp các segment ngụy trang.
+    - Nếu là Masked HLS Stream (như Ain Nguyen, Belle Delphine): giải mã và tải trực tiếp các segment ngụy trang.
     - Nếu là Direct Media Playlist (như Slo / callmeslooo): tải trực tiếp luồng thống nhất.
     - Nếu là Multivariant Playlist: tự động chọn độ phân giải tốt nhất, loại bỏ luồng 404 CDN,
       và đồng bộ luồng Video/Audio độc lập.
@@ -839,17 +912,30 @@ def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=
         vid_url, aud_url, total_dur = resolved
         is_masked = False
 
-    # Lần thử 1: Nếu phát hiện stream ngụy trang bằng ảnh (như Ain Nguyen)
+    # Lần thử 1: Nếu phát hiện stream ngụy trang bằng ảnh (như Ain Nguyen, Belle Delphine, ...)
     if is_masked:
         ok_mask, status_mask = download_masked_hls(
             vid_url, filepath, ffmpeg_exe,
+            session=session,
             progress_callback=progress_callback,
             cancel_check=cancel_check
         )
         if ok_mask or status_mask == "cancelled":
             return ok_mask, filepath, status_mask
 
-    # Lần thử 2: Chạy tiêu chuẩn bằng FFmpeg
+        # Thử lại lần 2 bằng download_masked_hls nếu lỗi do mạng chập chờn
+        # TUYỆT ĐỐI không fallback sang FFmpeg HTTP thông thường vì FFmpeg không thể giải mã JPEG segment
+        if not (cancel_check and cancel_check()):
+            time.sleep(1)
+            ok_mask2, status_mask2 = download_masked_hls(
+                vid_url, filepath, ffmpeg_exe,
+                session=session,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check
+            )
+            return ok_mask2, filepath, status_mask2
+
+    # Lần thử 2: Chạy tiêu chuẩn bằng FFmpeg cho stream không ngụy trang
     cmd = build_ffmpeg_cmd(ffmpeg_exe, vid_url, aud_url, filepath, header_arg)
     ok, status = _execute_ffmpeg_proc(cmd, filepath, total_dur, progress_callback, cancel_check)
     if ok or status == "cancelled":
@@ -873,6 +959,7 @@ def download_video(item, out_dir, ffmpeg_exe, quality="best", progress_callback=
     if not is_masked and not (cancel_check and cancel_check()):
         ok_last, status_last = download_masked_hls(
             vid_url, filepath, ffmpeg_exe,
+            session=session,
             progress_callback=progress_callback,
             cancel_check=cancel_check
         )

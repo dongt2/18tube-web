@@ -1616,9 +1616,10 @@ def api_system_open_folder():
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    raw_port = os.environ.get("SERVER_PORT") or os.environ.get("PORT") or "5000"
+    port = int(raw_port)
     print(f"==================================================")
-    print(f" 🚀 18TUBE SOURCE INSPECTOR WEB SERVER READY!")
-    print(f" 🌐 Truy cập bảng điều khiển: http://localhost:{port}")
+    print(f" 🚀 18TUBE SOURCE INSPECTOR WEB SERVER READY! (PORT: {port})")
+    print(f" 🌐 Truy cập bảng điều khiển: http://0.0.0.0:{port}")
     print(f"==================================================")
     app.run(host="0.0.0.0", port=port, debug=False)

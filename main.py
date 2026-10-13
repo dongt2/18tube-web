@@ -27,10 +27,12 @@ def main():
         except Exception as e:
             print(f"[!] Cảnh báo kiểm tra rclone: {e}")
 
-    port = int(os.environ.get("PORT", 5000))
+    raw_port = os.environ.get("SERVER_PORT") or os.environ.get("PORT") or "5000"
+    port = int(raw_port)
     print("==================================================")
     print(f" 🚀 18TUBE CLOUD RUNTIME READY (PORT: {port})")
     print(f" 🌐 Access Gallery: http://0.0.0.0:{port}/gallery")
+    print(f" ⚙️ Environment port: SERVER_PORT={os.environ.get('SERVER_PORT')}, PORT={os.environ.get('PORT')}")
     print("==================================================")
     sys.stdout.flush()
 

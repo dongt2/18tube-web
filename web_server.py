@@ -199,7 +199,7 @@ def build_all_drive_cache(force=False):
     """
     if not force:
         cached_summary = get_cached("drive_summary_all")
-        if cached_summary:
+        if cached_summary and cached_summary.get("total_files", 0) > 0:
             valid_creators = [c for c in cached_summary.get("creators", []) if not (c.get("slug", "").startswith("_") and "/" not in c.get("slug", ""))]
             if len(valid_creators) == len(cached_summary.get("creators", [])):
                 return cached_summary
@@ -248,7 +248,7 @@ def build_all_drive_cache(force=False):
                         "total_size_str": format_bytes(t_sz),
                         "drive_url": f"https://drive.google.com/drive/folders/{c_data.get('id', '')}" if c_data.get('id') else ""
                     })
-            if len(cached_creators) >= 10:
+            if len(cached_creators) >= 10 and tot_files > 0:
                 cached_creators.sort(key=lambda x: (x.get("country") != "Việt Nam", (x.get("country") or "").lower(), x["name"].lower()))
                 summary_res = {
                     "total_creators": len(cached_creators),
@@ -263,9 +263,9 @@ def build_all_drive_cache(force=False):
             print(f"Lỗi đọc SQLite khi tổng hợp creator: {e}")
 
     raw_json = run_rclone([
-        "lsjson", "gg:18TUBE", "--recursive", "--max-depth", "3",
+        "lsjson", "gg:18TUBE", "--recursive", "--max-depth", "5",
         "--fast-list", "--drive-pacer-min-sleep", "10ms"
-    ], timeout=60)
+    ], timeout=120)
     items = json.loads(raw_json)
 
     creator_map = {}

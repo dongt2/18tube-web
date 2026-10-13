@@ -1065,6 +1065,10 @@
     function openMediaModal(type, src, title) {
         if (type === 'video') {
             elements.videoModalTitle.textContent = title || 'Phát Video';
+            const extLink = document.getElementById('video-modal-external');
+            if (extLink) extLink.href = src;
+            const dlLink = document.getElementById('video-modal-download');
+            if (dlLink) dlLink.href = src + (src.includes('?') ? '&dl=1' : '?dl=1');
             elements.videoModal.classList.add('active');
             const vjs = getOrCreateAppPlayer();
             if (vjs) {
@@ -1073,6 +1077,12 @@
                     const playPromise = vjs.play();
                     if (playPromise !== undefined) {
                         playPromise.catch(() => {});
+                    }
+                });
+                vjs.one('error', () => {
+                    if (elements.videoPlayer) {
+                        elements.videoPlayer.src = src;
+                        elements.videoPlayer.play().catch(() => {});
                     }
                 });
             } else if (elements.videoPlayer) {

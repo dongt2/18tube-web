@@ -19,8 +19,8 @@ tunnel_url.txt
 *.log
 .drive_cache.json
 .drive_cache.json*
-.drive_cache.db-wal
-.drive_cache.db-shm
+.drive_cache.db*
+.drive_cache.db
 
 # IDE & Config
 .vscode/

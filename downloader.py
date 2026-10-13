@@ -38,20 +38,41 @@ SUBPROCESS_EXTRA = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platfor
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
     "Referer": "https://18tube.nl/"
 }
 
 def create_optimized_session(pool_size=16):
-    """Tạo requests Session với Connection Pooling tái sử dụng socket TCP."""
-    session = requests.Session()
-    adapter = HTTPAdapter(
-        pool_connections=pool_size,
-        pool_maxsize=pool_size,
-        max_retries=3
-    )
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
+    """Tạo requests/cloudscraper Session với Connection Pooling & Tự động vượt Cloudflare nếu chạy trên Cloud."""
+    session = None
+    try:
+        import cloudscraper
+        session = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
+        )
+    except Exception:
+        pass
+
+    if session is None:
+        session = requests.Session()
+        adapter = HTTPAdapter(
+            pool_connections=pool_size,
+            pool_maxsize=pool_size,
+            max_retries=3
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+
     session.headers.update(HEADERS)
     return session
 
@@ -159,8 +180,8 @@ def fetch_creator_metadata(creator_slug):
         pass
     return meta
 
-def collect_media_items(creator_slug, progress_callback=None, cancel_check=None):
-    """Quét toàn bộ danh sách ảnh và video từ feed của creator."""
+def collect_media_items(creator_slug, progress_callback=None, cancel_check=None, log_callback=None):
+    """Quét toàn bộ danh sách ảnh và video từ feed của creator với cơ chế vượt Cloudflare."""
     base_url = f"https://18tube.nl/{creator_slug}"
     photos = []
     videos = []
@@ -169,25 +190,43 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None)
     
     session = create_optimized_session(8)
 
+    def _log_msg(msg):
+        if log_callback:
+            log_callback(msg)
+        elif progress_callback:
+            try:
+                progress_callback(msg)
+            except Exception:
+                pass
+
     while True:
         if cancel_check and cancel_check():
             break
 
         url = f"{base_url}/all/page/{page}/" if page > 1 else f"{base_url}/"
+        resp = None
         try:
-            resp = session.get(url, timeout=15)
+            resp = session.get(url, timeout=20)
+            
+            # Kiểm tra nếu bị Cloudflare chặn bot trên Cloud (403, 503 hoặc HTML challenge)
+            if resp.status_code in (403, 503) or (resp.status_code == 200 and ("Just a moment..." in resp.text or "cf-browser-verification" in resp.text)):
+                _log_msg(f"[!] Phát hiện Cloudflare Challenge tại trang {page}. Đang kích hoạt Chrome TLS Engine...")
+                try:
+                    from curl_cffi import requests as c_requests
+                    c_sess = c_requests.Session(impersonate="chrome124")
+                    c_resp = c_sess.get(url, headers=HEADERS, timeout=20)
+                    if c_resp.status_code == 200 and "light-gallery-item" in c_resp.text:
+                        resp = c_resp
+                        _log_msg(f"[✓] Vượt qua Cloudflare thành công bằng Chrome TLS Engine!")
+                except Exception as _ce:
+                    _log_msg(f"[!] Thử vượt Cloudflare: {_ce}")
+
             if resp.status_code == 404:
+                _log_msg(f"[-] Không tìm thấy creator '{creator_slug}' (404 Not Found) tại {url}")
                 break
             resp.raise_for_status()
         except Exception as e:
-            if progress_callback:
-                try:
-                    progress_callback(page, 0, len(photos), len(videos))
-                except TypeError:
-                    try:
-                        progress_callback(f"[!] Lỗi tải trang {page}: {e}")
-                    except Exception:
-                        pass
+            _log_msg(f"[!] Lỗi kết nối khi quét trang {page} của '{creator_slug}': {e}")
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -228,6 +267,11 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None)
                     pass
 
         if new_items == 0:
+            if page == 1 and (len(photos) == 0 and len(videos) == 0):
+                if resp and ("Just a moment..." in resp.text or "challenge-platform" in resp.text):
+                    _log_msg(f"[!] Cảnh báo: Trang bị Cloudflare chặn bot (HTML Challenge).")
+                else:
+                    _log_msg(f"[i] Creator '{creator_slug}' không có bài đăng hoặc feed rỗng.")
             break
         page += 1
 
@@ -496,9 +540,9 @@ def download_masked_hls(playlist_url, filepath, ffmpeg_exe, session=None, progre
                 progress_callback(d, t, spd, pct)
 
     try:
-        req = urllib.request.Request(playlist_url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            playlist_text = resp.read().decode('utf-8', errors='ignore')
+        r_pl = session.get(playlist_url, timeout=15)
+        r_pl.raise_for_status()
+        playlist_text = r_pl.text
     except Exception as e:
         return False, str(e)
 
@@ -1423,7 +1467,8 @@ def cloud_download_and_upload_creator(
     photos, videos = collect_media_items(
         creator_slug,
         progress_callback=_scan_cb,
-        cancel_check=cancel_check
+        cancel_check=cancel_check,
+        log_callback=_log
     )
 
     if cancel_check and cancel_check():

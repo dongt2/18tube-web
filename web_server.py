@@ -1790,6 +1790,11 @@ def _run_cloud_download_worker(slugs, quality, drive_folder, auto_clean):
                 log_callback=_append_cloud_dl_log
             )
 
+            if not ok:
+                _append_cloud_dl_log(f"[!] Bỏ qua {slug}: {msg}")
+            else:
+                _append_cloud_dl_log(f"[✓] Đã tải và đẩy thành công {slug} lên Google Drive!")
+
             with _cloud_dl_lock:
                 _cloud_dl_state["completed_count"] = idx
                 _cloud_dl_state["progress_pct"] = int((idx / len(slugs)) * 100)

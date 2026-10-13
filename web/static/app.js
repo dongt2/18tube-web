@@ -401,6 +401,15 @@
                     elements.overviewBadge.textContent = `${data.creators.length} Creator`;
                     elements.tabDriveCount.textContent = data.creators.length;
                     elements.driveSidebarCount.textContent = data.creators.length;
+                    
+                    if (data.total_files !== undefined && data.total_files > 0) {
+                        elements.mTotalFiles.textContent = data.total_files.toLocaleString('vi-VN');
+                        const pCnt = data.total_photos || 0;
+                        const vCnt = data.total_videos || 0;
+                        elements.mFilesRatio.textContent = `${pCnt.toLocaleString('vi-VN')} Ảnh / ${vCnt.toLocaleString('vi-VN')} Video`;
+                    }
+                    
+                    renderOverviewCountryRibbon(data.creators);
                     renderDriveSidebar(data.creators);
                     renderVerifyChips(data.creators);
                     renderOverviewCards(data.creators);
@@ -417,7 +426,29 @@
             const data = await res.json();
             if (data.success && data.data) {
                 state.driveSummary = data.data;
-                state.driveCreators = data.data.creators || [];
+                const newCreators = data.data.creators || [];
+                if (newCreators.length >= (state.driveCreators ? state.driveCreators.length : 0)) {
+                    state.driveCreators = newCreators;
+                } else if (state.driveCreators && state.driveCreators.length > 0) {
+                    // Trộn thông tin số lượng file mà không làm mất danh sách creator hiện tại
+                    const countMap = {};
+                    newCreators.forEach(c => {
+                        countMap[c.slug] = c;
+                        if (c.name) countMap[c.name] = c;
+                    });
+                    state.driveCreators.forEach(c => {
+                        const m = countMap[c.slug] || countMap[c.name];
+                        if (m) {
+                            c.photos_count = m.photos_count || c.photos_count;
+                            c.videos_count = m.videos_count || c.videos_count;
+                            c.total_files = m.total_files || c.total_files;
+                            c.total_size = m.total_size || c.total_size;
+                            c.total_size_str = m.total_size_str || c.total_size_str;
+                        }
+                    });
+                } else {
+                    state.driveCreators = newCreators;
+                }
                 renderOverview(data.data);
                 renderDriveSidebar(state.driveCreators);
                 renderVerifyChips(state.driveCreators);

@@ -116,6 +116,14 @@ def clear_cache():
     except Exception:
         pass
 
+def _get_cached_creators_list():
+    raw = get_cached("drive_creators_list") or get_cached("drive_creators_list_v3") or []
+    if isinstance(raw, dict):
+        return raw.get("creators", [])
+    if isinstance(raw, list):
+        return raw
+    return []
+
 def run_rclone(args, timeout=60):
     """Chạy rclone tương thích đa nền tảng (Windows & Linux)."""
     rc = downloader.get_rclone_path()
@@ -199,10 +207,8 @@ def build_all_drive_cache(force=False):
     """
     if not force:
         cached_summary = get_cached("drive_summary_all")
-        if cached_summary and cached_summary.get("total_files", 0) > 0:
-            valid_creators = [c for c in cached_summary.get("creators", []) if not (c.get("slug", "").startswith("_") and "/" not in c.get("slug", ""))]
-            if len(valid_creators) == len(cached_summary.get("creators", [])):
-                return cached_summary
+        if cached_summary and cached_summary.get("total_files", 0) > 0 and len(cached_summary.get("creators", [])) >= 100:
+            return cached_summary
 
         # Tối ưu siêu tốc (0.001s): Tổng hợp trực tiếp từ SQLite cache các creator đã nạp
         try:
@@ -214,45 +220,55 @@ def build_all_drive_cache(force=False):
             cached_creators = []
             tot_files = 0
             tot_bytes = 0
+            tot_photos = 0
+            tot_videos = 0
             seen_slugs = set()
             for k, val_bytes in rows:
-                c_item = json.loads(zlib.decompress(val_bytes).decode("utf-8"))
-                c_data = c_item.get("data", {})
-                if isinstance(c_data, dict):
-                    c_slug = c_data.get("slug", "")
-                    if not c_slug or (c_slug.startswith("_") and "/" not in c_slug):
-                        continue
-                    real_c_slug = c_slug if "/" in c_slug else f"_Vietnam/{c_slug}"
-                    if real_c_slug in seen_slugs:
-                        continue
-                    seen_slugs.add(real_c_slug)
+                try:
+                    c_item = json.loads(zlib.decompress(val_bytes).decode("utf-8"))
+                    c_data = c_item.get("data", {}) if isinstance(c_item, dict) and "data" in c_item else c_item
+                    if isinstance(c_data, dict):
+                        c_slug = c_data.get("slug", "") or k.replace("drive_creator_items_", "")
+                        if not c_slug or (c_slug.startswith("_") and "/" not in c_slug):
+                            continue
+                        norm_name = c_slug.split("/")[-1].lower()
+                        if norm_name in seen_slugs:
+                            continue
+                        seen_slugs.add(norm_name)
 
-                    c_name = c_data.get("name") or real_c_slug.split("/")[-1]
-                    c_folder = real_c_slug.split("/")[0] if "/" in real_c_slug else "_Vietnam"
-                    c_info = get_country_info(c_folder)
-                    c_country = c_data.get("country") or c_info["name"]
-                    p_cnt = c_data.get("photos_count", 0)
-                    v_cnt = c_data.get("videos_count", 0)
-                    t_sz = c_data.get("total_size", 0)
-                    tot_files += (p_cnt + v_cnt)
-                    tot_bytes += t_sz
-                    cached_creators.append({
-                        "slug": real_c_slug,
-                        "name": c_name,
-                        "country": c_country,
-                        "country_flag": c_info["flag"],
-                        "photos_count": p_cnt,
-                        "videos_count": v_cnt,
-                        "total_files": p_cnt + v_cnt,
-                        "total_size": t_sz,
-                        "total_size_str": format_bytes(t_sz),
-                        "drive_url": f"https://drive.google.com/drive/folders/{c_data.get('id', '')}" if c_data.get('id') else ""
-                    })
-            if len(cached_creators) >= 10 and tot_files > 0:
+                        real_c_slug = c_slug if "/" in c_slug else f"_Vietnam/{c_slug}"
+                        c_name = c_data.get("name") or c_slug.split("/")[-1]
+                        c_folder = c_slug.split("/")[0] if "/" in c_slug else "_Vietnam"
+                        c_info = get_country_info(c_folder)
+                        c_country = c_data.get("country") or c_info["name"]
+                        p_cnt = c_data.get("photos_count", len(c_data.get("photos", [])))
+                        v_cnt = c_data.get("videos_count", len(c_data.get("videos", [])))
+                        t_sz = c_data.get("total_size", 0)
+                        tot_files += (p_cnt + v_cnt)
+                        tot_photos += p_cnt
+                        tot_videos += v_cnt
+                        tot_bytes += t_sz
+                        cached_creators.append({
+                            "slug": c_slug,
+                            "name": c_name,
+                            "country": c_country,
+                            "country_flag": c_info["flag"],
+                            "photos_count": p_cnt,
+                            "videos_count": v_cnt,
+                            "total_files": p_cnt + v_cnt,
+                            "total_size": t_sz,
+                            "total_size_str": format_bytes(t_sz),
+                            "drive_url": f"https://drive.google.com/drive/folders/{c_data.get('id', '')}" if c_data.get('id') else ""
+                        })
+                except Exception:
+                    continue
+            if len(cached_creators) >= 100 and tot_files > 0:
                 cached_creators.sort(key=lambda x: (x.get("country") != "Việt Nam", (x.get("country") or "").lower(), x["name"].lower()))
                 summary_res = {
                     "total_creators": len(cached_creators),
                     "total_files": tot_files,
+                    "total_photos": tot_photos,
+                    "total_videos": tot_videos,
                     "total_size": tot_bytes,
                     "total_size_str": format_bytes(tot_bytes),
                     "creators": cached_creators
@@ -423,7 +439,7 @@ def build_all_drive_cache(force=False):
 def _background_prefetch_creators():
     """Luồng quét ngầm từng creator một cách an toàn và bền bỉ (không bao giờ timeout)."""
     try:
-        creators = get_cached("drive_creators_list") or []
+        creators = _get_cached_creators_list()
         for c in creators:
             c_slug = c.get("slug")
             if not c_slug or (c_slug.startswith("_") and "/" not in c_slug):
@@ -493,6 +509,30 @@ def _background_prefetch_creators():
     except Exception:
         pass
 
+def _enrich_creator_stats(creators):
+    """Bổ sung số lượng ảnh, video, dung lượng từ SQLite cache cho danh sách creators."""
+    for c in creators:
+        c_slug = c.get("slug", "")
+        c_name = c.get("name", "")
+        cd = get_cached(f"drive_creator_items_{c_slug}") or get_cached(f"drive_creator_items_{c_name}")
+        if not cd and "/" in c_slug:
+            cd = get_cached(f"drive_creator_items_{c_slug.split('/')[-1]}")
+        if cd and isinstance(cd, dict):
+            p_cnt = cd.get("photos_count", len(cd.get("photos", [])))
+            v_cnt = cd.get("videos_count", len(cd.get("videos", [])))
+            t_sz = cd.get("total_size", 0)
+            c["photos_count"] = p_cnt
+            c["videos_count"] = v_cnt
+            c["total_files"] = p_cnt + v_cnt
+            c["total_size"] = t_sz
+            c["total_size_str"] = format_bytes(t_sz)
+        else:
+            c.setdefault("photos_count", 0)
+            c.setdefault("videos_count", 0)
+            c.setdefault("total_files", 0)
+            c.setdefault("total_size", 0)
+            c.setdefault("total_size_str", "0 B")
+
 def get_drive_creators_hierarchy(force=False):
     """
     Quét danh sách creator trên Google Drive theo cấu trúc thư mục mới:
@@ -502,8 +542,10 @@ def get_drive_creators_hierarchy(force=False):
     cache_key = "drive_creators_list_v3"
     if not force:
         cached = get_cached(cache_key)
-        if cached and isinstance(cached, dict):
-            return cached.get("creators", []), cached.get("countries", [])
+        if cached and isinstance(cached, dict) and len(cached.get("creators", [])) >= 100:
+            creators = cached.get("creators", [])
+            _enrich_creator_stats(creators)
+            return creators, cached.get("countries", [])
 
     # Quét thư mục gốc gg:18TUBE
     raw_json = run_rclone(["lsjson", "gg:18TUBE", "--max-depth", "1", "--drive-pacer-min-sleep", "10ms"], timeout=15)
@@ -599,6 +641,7 @@ def get_drive_creators_hierarchy(force=False):
             "count": country_counts[c_name]
         })
 
+    _enrich_creator_stats(creators)
     creators.sort(key=lambda x: (x["country"] != "Việt Nam", x["country"].lower(), x["name"].lower()))
     
     result_payload = {
@@ -720,7 +763,22 @@ def api_drive_creators():
     try:
         force = request.args.get("refresh", "0") == "1"
         creators, countries = get_drive_creators_hierarchy(force=force)
-        return jsonify({"success": True, "creators": creators, "countries": countries, "cached": not force})
+        total_files = sum(c.get("total_files", 0) for c in creators)
+        total_photos = sum(c.get("photos_count", 0) for c in creators)
+        total_videos = sum(c.get("videos_count", 0) for c in creators)
+        total_size = sum(c.get("total_size", 0) for c in creators)
+        return jsonify({
+            "success": True,
+            "creators": creators,
+            "countries": countries,
+            "total_creators": len(creators),
+            "total_files": total_files,
+            "total_photos": total_photos,
+            "total_videos": total_videos,
+            "total_size": total_size,
+            "total_size_str": format_bytes(total_size),
+            "cached": not force
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -739,9 +797,14 @@ def api_drive_creator_detail(slug):
 
         # 1. HỖ TRỢ CHẾ ĐỘ "ALL" (TẤT CẢ CREATOR): Tự động tổng hợp từ tất cả Creator đang có trong cache
         if slug.lower() == "all":
+            country_filter = request.args.get("country", "").strip()
+            if (not country_filter or country_filter.lower() in ["all", "__all__"]) and not force:
+                cached_all = get_cached("drive_creator_items_all")
+                if cached_all and cached_all.get("total_items", 0) > 0:
+                    return jsonify({"success": True, "data": cached_all, "cached": True})
+
             all_photos = []
             all_videos = []
-            country_filter = request.args.get("country", "").strip()
 
             try:
                 conn = _get_db()
@@ -751,20 +814,23 @@ def api_drive_creator_detail(slug):
                     rows = cur.fetchall()
                 seen_all_slugs = set()
                 for k, val_bytes in rows:
-                    c_item = json.loads(zlib.decompress(val_bytes).decode("utf-8"))
-                    c_data = c_item.get("data", {}) if isinstance(c_item, dict) and "data" in c_item else c_item
-                    if isinstance(c_data, dict):
-                        c_slug = c_data.get("slug", "") or k.replace("drive_creator_items_", "")
-                        norm_slug = c_slug.split("/")[-1].lower() if c_slug else ""
-                        if not norm_slug or norm_slug in seen_all_slugs:
-                            continue
-                        seen_all_slugs.add(norm_slug)
-                        c_country = c_data.get("country", "Việt Nam")
-                        if country_filter and country_filter.lower() not in ["all", "__all__"]:
-                            if c_country.lower() != country_filter.lower():
+                    try:
+                        c_item = json.loads(zlib.decompress(val_bytes).decode("utf-8"))
+                        c_data = c_item.get("data", {}) if isinstance(c_item, dict) and "data" in c_item else c_item
+                        if isinstance(c_data, dict):
+                            c_slug = c_data.get("slug", "") or k.replace("drive_creator_items_", "")
+                            norm_slug = c_slug.split("/")[-1].lower() if c_slug else ""
+                            if not norm_slug or norm_slug in seen_all_slugs:
                                 continue
-                        all_photos.extend(c_data.get("photos", []))
-                        all_videos.extend(c_data.get("videos", []))
+                            seen_all_slugs.add(norm_slug)
+                            c_country = c_data.get("country", "Việt Nam")
+                            if country_filter and country_filter.lower() not in ["all", "__all__"]:
+                                if c_country.lower() != country_filter.lower():
+                                    continue
+                            all_photos.extend(c_data.get("photos", []))
+                            all_videos.extend(c_data.get("videos", []))
+                    except Exception:
+                        continue
             except Exception as e:
                 print(f"Lỗi đọc SQLite khi tổng hợp creator all: {e}")
 
@@ -788,8 +854,8 @@ def api_drive_creator_detail(slug):
 
         # Tự động chuẩn hóa slug: tìm kiếm trong danh sách creator hiện có
         real_slug = slug
-        c_list = get_cached("drive_creators_list") or []
-        matched_c = next((c for c in c_list if c.get("slug") == slug or c.get("name") == slug), None)
+        c_list = _get_cached_creators_list()
+        matched_c = next((c for c in c_list if isinstance(c, dict) and (c.get("slug") == slug or c.get("name") == slug or c.get("slug", "").endswith("/" + slug))), None)
         if matched_c:
             real_slug = matched_c.get("slug", slug)
 
@@ -1307,8 +1373,8 @@ def api_verify_creator():
 
         if source_type == "drive":
             real_slug = slug
-            c_list = get_cached("drive_creators_list") or []
-            matched_c = next((c for c in c_list if c.get("slug") == slug or c.get("name") == slug), None)
+            c_list = _get_cached_creators_list()
+            matched_c = next((c for c in c_list if isinstance(c, dict) and (c.get("slug") == slug or c.get("name") == slug or c.get("slug", "").endswith("/" + slug))), None)
             if matched_c:
                 real_slug = matched_c.get("slug", slug)
 
@@ -1481,7 +1547,7 @@ def _run_verify_all_worker():
         summary_data = build_all_drive_cache(force=False)
         creators = summary_data.get("creators", []) if summary_data else []
         if not creators:
-            creators = get_cached("drive_creators_list") or []
+            creators = _get_cached_creators_list()
 
         with _verify_all_lock:
             _verify_all_state["running"] = True

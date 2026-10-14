@@ -1470,16 +1470,11 @@ def main():
     args = parser.parse_args()
 
     if args.gui:
-        try:
-            import gui
-            gui.launch_gui()
-            return
-        except ImportError:
-            print("[!] Repository 18tube-web là phiên bản Web chuyên dụng, không bao gồm GUI Desktop.")
-            print("[*] Vui lòng sử dụng Web Gallery qua trình duyệt:")
-            print("    👉 Chạy lệnh: python web_server.py (hoặc mở file run_gallery.bat)")
-            print("    👉 Truy cập:  http://localhost:5000/gallery")
-            return
+        print("[!] Repository 18tube-web là phiên bản Web chuyên dụng, không bao gồm GUI Desktop.")
+        print("[*] Vui lòng sử dụng Web Gallery qua trình duyệt:")
+        print("    👉 Chạy lệnh: python web_server.py (hoặc mở file run_gallery.bat)")
+        print("    👉 Truy cập:  http://localhost:5000/gallery")
+        return
 
     creator_slugs = []
     if args.file and os.path.exists(args.file):

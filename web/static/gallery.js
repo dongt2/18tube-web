@@ -102,23 +102,6 @@
 
         toastContainer: document.getElementById('cinema-toast-container'),
         galleryPagination: document.getElementById('gallery-pagination'),
-
-        // Cloud Downloader Modal
-        btnCloudDownload: document.getElementById('btn-cloud-download'),
-        cloudDlModal: document.getElementById('cloud-dl-modal'),
-        cloudDlBackdrop: document.getElementById('cloud-dl-backdrop'),
-        cloudDlClose: document.getElementById('cloud-dl-close'),
-        cloudDlUrls: document.getElementById('cloud-dl-urls'),
-        cloudDlQuality: document.getElementById('cloud-dl-quality'),
-        cloudDlFolder: document.getElementById('cloud-dl-folder'),
-        cloudDlAutoClean: document.getElementById('cloud-dl-autoclean'),
-        cloudDlProgressBox: document.getElementById('cloud-dl-progress-box'),
-        cloudDlStepLabel: document.getElementById('cloud-dl-step-label'),
-        cloudDlPctLabel: document.getElementById('cloud-dl-pct-label'),
-        cloudDlBarFill: document.getElementById('cloud-dl-bar-fill'),
-        cloudDlLogBox: document.getElementById('cloud-dl-log-box'),
-        btnCloudDlStart: document.getElementById('btn-cloud-dl-start'),
-        btnCloudDlStop: document.getElementById('btn-cloud-dl-stop'),
     };
 
     // ==========================================
@@ -1082,174 +1065,10 @@
     }
 
     // ==========================================
-    // CLOUD DOWNLOADER CONTROLLER (DIRECT TO DRIVE)
-    // ==========================================
-    let cloudDlPollTimer = null;
-
-    function openCloudDlModal() {
-        if (!elements.cloudDlModal) return;
-        elements.cloudDlModal.style.display = 'flex';
-        checkCloudDlStatus();
-    }
-
-    function closeCloudDlModal() {
-        if (!elements.cloudDlModal) return;
-        elements.cloudDlModal.style.display = 'none';
-    }
-
-    async function checkCloudDlStatus() {
-        try {
-            const res = await fetch('/api/cloud/download/status');
-            const data = await res.json();
-            if (!data.success) return;
-
-            updateCloudDlUI(data);
-
-            if (data.running) {
-                startCloudDlPolling();
-            }
-        } catch (e) {
-            console.error('Lỗi kiểm tra trạng thái Cloud Downloader:', e);
-        }
-    }
-
-    function updateCloudDlUI(data) {
-        if (!elements.cloudDlProgressBox) return;
-
-        if (data.running || data.progress_pct > 0 || (data.logs && data.logs.length > 0)) {
-            elements.cloudDlProgressBox.style.display = 'flex';
-        }
-
-        if (elements.cloudDlStepLabel) {
-            elements.cloudDlStepLabel.textContent = data.current_step || 'Đang xử lý...';
-        }
-        if (elements.cloudDlPctLabel) {
-            elements.cloudDlPctLabel.textContent = `${data.progress_pct || 0}%`;
-        }
-        if (elements.cloudDlBarFill) {
-            elements.cloudDlBarFill.style.width = `${data.progress_pct || 0}%`;
-        }
-        if (elements.cloudDlLogBox && data.logs) {
-            elements.cloudDlLogBox.textContent = data.logs.join('\n');
-            elements.cloudDlLogBox.scrollTop = elements.cloudDlLogBox.scrollHeight;
-        }
-
-        if (elements.btnCloudDlStart) {
-            elements.btnCloudDlStart.disabled = !!data.running;
-            elements.btnCloudDlStart.style.opacity = data.running ? '0.5' : '1';
-            elements.btnCloudDlStart.textContent = data.running ? 'Đang tải lên Drive...' : 'Bắt đầu tải lên Drive';
-        }
-        if (elements.btnCloudDlStop) {
-            elements.btnCloudDlStop.style.display = data.running ? 'inline-block' : 'none';
-        }
-    }
-
-    function startCloudDlPolling() {
-        if (cloudDlPollTimer) return;
-        cloudDlPollTimer = setInterval(async () => {
-            try {
-                const res = await fetch('/api/cloud/download/status');
-                const data = await res.json();
-                if (!data.success) return;
-
-                updateCloudDlUI(data);
-
-                if (!data.running) {
-                    stopCloudDlPolling();
-                    if (data.completed_count > 0) {
-                        showToast(`Hoàn tất tải ${data.completed_count} creator lên Google Drive!`, 'info');
-                        state.creatorCache = {};
-                        await loadCreators();
-                    }
-                }
-            } catch (e) {
-                console.error('Lỗi thăm dò tiến trình Cloud:', e);
-            }
-        }, 1200);
-    }
-
-    function stopCloudDlPolling() {
-        if (cloudDlPollTimer) {
-            clearInterval(cloudDlPollTimer);
-            cloudDlPollTimer = null;
-        }
-    }
-
-    async function startCloudDownload() {
-        const rawUrls = (elements.cloudDlUrls?.value || '').trim();
-        if (!rawUrls) {
-            showToast('Vui lòng nhập ít nhất 1 link creator!', 'error');
-            elements.cloudDlUrls?.focus();
-            return;
-        }
-
-        const payload = {
-            urls: rawUrls,
-            quality: elements.cloudDlQuality?.value || 'best',
-            drive_folder: (elements.cloudDlFolder?.value || '18TUBE').trim(),
-            auto_clean: elements.cloudDlAutoClean ? elements.cloudDlAutoClean.checked : true
-        };
-
-        if (elements.btnCloudDlStart) {
-            elements.btnCloudDlStart.disabled = true;
-            elements.btnCloudDlStart.textContent = 'Đang khởi tạo...';
-        }
-
-        try {
-            const res = await fetch('/api/cloud/download/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (!res.ok || !data.success) {
-                throw new Error(data.error || 'Khởi tạo tiến trình thất bại');
-            }
-
-            showToast(data.message || 'Đã bắt đầu tải Cloud!', 'info');
-            if (elements.cloudDlProgressBox) elements.cloudDlProgressBox.style.display = 'flex';
-            startCloudDlPolling();
-        } catch (err) {
-            showToast(err.message || 'Không thể bắt đầu tải Cloud', 'error');
-            if (elements.btnCloudDlStart) {
-                elements.btnCloudDlStart.disabled = false;
-                elements.btnCloudDlStart.textContent = 'Bắt đầu tải lên Drive';
-            }
-        }
-    }
-
-    async function stopCloudDownload() {
-        try {
-            const res = await fetch('/api/cloud/download/stop', { method: 'POST' });
-            const data = await res.json();
-            showToast(data.message || 'Đã gửi lệnh dừng', 'info');
-        } catch (e) {
-            showToast('Lỗi khi gửi lệnh dừng', 'error');
-        }
-    }
-
-    // ==========================================
     // EVENT LISTENERS INITIALIZATION
     // ==========================================
 
     function initEvents() {
-        // Cloud Downloader modal events
-        if (elements.btnCloudDownload) {
-            elements.btnCloudDownload.addEventListener('click', openCloudDlModal);
-        }
-        if (elements.cloudDlClose) {
-            elements.cloudDlClose.addEventListener('click', closeCloudDlModal);
-        }
-        if (elements.cloudDlBackdrop) {
-            elements.cloudDlBackdrop.addEventListener('click', closeCloudDlModal);
-        }
-        if (elements.btnCloudDlStart) {
-            elements.btnCloudDlStart.addEventListener('click', startCloudDownload);
-        }
-        if (elements.btnCloudDlStop) {
-            elements.btnCloudDlStop.addEventListener('click', stopCloudDownload);
-        }
-
         // Refresh / Sync Cache Button
         if (elements.btnRefreshCache) {
             elements.btnRefreshCache.addEventListener('click', async () => {
@@ -1492,14 +1311,6 @@
             if (e.key === 'Escape' && document.activeElement === elements.gallerySearch) {
                 elements.gallerySearch.blur();
                 return;
-            }
-
-            // If in Cloud Downloader Modal
-            if (elements.cloudDlModal && elements.cloudDlModal.style.display === 'flex') {
-                if (e.key === 'Escape') {
-                    closeCloudDlModal();
-                    return;
-                }
             }
 
             // If in Theater video

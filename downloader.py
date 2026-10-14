@@ -38,41 +38,20 @@ SUBPROCESS_EXTRA = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platfor
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
-    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://18tube.nl/"
 }
 
 def create_optimized_session(pool_size=16):
-    """Tạo requests/cloudscraper Session với Connection Pooling & Tự động vượt Cloudflare nếu chạy trên Cloud."""
-    session = None
-    try:
-        import cloudscraper
-        session = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-        )
-    except Exception:
-        pass
-
-    if session is None:
-        session = requests.Session()
-        adapter = HTTPAdapter(
-            pool_connections=pool_size,
-            pool_maxsize=pool_size,
-            max_retries=3
-        )
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-
+    """Tạo requests Session với Connection Pooling tái sử dụng socket TCP."""
+    session = requests.Session()
+    adapter = HTTPAdapter(
+        pool_connections=pool_size,
+        pool_maxsize=pool_size,
+        max_retries=3
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
     session.headers.update(HEADERS)
     return session
 
@@ -133,9 +112,9 @@ def get_ffmpeg_path():
     return None
 
 def extract_creator_slug(url):
-    """Trích xuất tên creator từ URL hoặc chuỗi slug."""
+    """Trích xuất tên creator từ URL."""
     clean = url.strip()
-    m = re.search(r"18tube\.[a-z0-9]+/(?:creator/)?([^/?#]+)", clean, re.IGNORECASE)
+    m = re.search(r"18tube\.nl/([^/?#]+)", clean)
     if m:
         return m.group(1).lstrip("@")
     parts = [p for p in clean.replace("\\", "/").split("/") if p]
@@ -180,8 +159,8 @@ def fetch_creator_metadata(creator_slug):
         pass
     return meta
 
-def collect_media_items(creator_slug, progress_callback=None, cancel_check=None, log_callback=None):
-    """Quét toàn bộ danh sách ảnh và video từ feed của creator với cơ chế vượt Cloudflare."""
+def collect_media_items(creator_slug, progress_callback=None, cancel_check=None):
+    """Quét toàn bộ danh sách ảnh và video từ feed của creator."""
     base_url = f"https://18tube.nl/{creator_slug}"
     photos = []
     videos = []
@@ -190,43 +169,19 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None,
     
     session = create_optimized_session(8)
 
-    def _log_msg(msg):
-        if log_callback:
-            log_callback(msg)
-        elif progress_callback:
-            try:
-                progress_callback(msg)
-            except Exception:
-                pass
-
     while True:
         if cancel_check and cancel_check():
             break
 
         url = f"{base_url}/all/page/{page}/" if page > 1 else f"{base_url}/"
-        resp = None
         try:
-            resp = session.get(url, timeout=20)
-            
-            # Kiểm tra nếu bị Cloudflare chặn bot trên Cloud (403, 503 hoặc HTML challenge)
-            if resp.status_code in (403, 503) or (resp.status_code == 200 and ("Just a moment..." in resp.text or "cf-browser-verification" in resp.text)):
-                _log_msg(f"[!] Phát hiện Cloudflare Challenge tại trang {page}. Đang kích hoạt Chrome TLS Engine...")
-                try:
-                    from curl_cffi import requests as c_requests
-                    c_sess = c_requests.Session(impersonate="chrome124")
-                    c_resp = c_sess.get(url, headers=HEADERS, timeout=20)
-                    if c_resp.status_code == 200 and "light-gallery-item" in c_resp.text:
-                        resp = c_resp
-                        _log_msg(f"[✓] Vượt qua Cloudflare thành công bằng Chrome TLS Engine!")
-                except Exception as _ce:
-                    _log_msg(f"[!] Thử vượt Cloudflare: {_ce}")
-
+            resp = session.get(url, timeout=15)
             if resp.status_code == 404:
-                _log_msg(f"[-] Không tìm thấy creator '{creator_slug}' (404 Not Found) tại {url}")
                 break
             resp.raise_for_status()
         except Exception as e:
-            _log_msg(f"[!] Lỗi kết nối khi quét trang {page} của '{creator_slug}': {e}")
+            if progress_callback:
+                progress_callback(f"[!] Lỗi tải trang {page}: {e}")
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -258,20 +213,9 @@ def collect_media_items(creator_slug, progress_callback=None, cancel_check=None,
                 new_items += 1
 
         if progress_callback:
-            try:
-                progress_callback(page, new_items, len(photos), len(videos))
-            except TypeError:
-                try:
-                    progress_callback(f"Trang {page}: +{new_items} mục (Tổng: {len(photos)} ảnh, {len(videos)} video)")
-                except Exception:
-                    pass
+            progress_callback(page, new_items, len(photos), len(videos))
 
         if new_items == 0:
-            if page == 1 and (len(photos) == 0 and len(videos) == 0):
-                if resp and ("Just a moment..." in resp.text or "challenge-platform" in resp.text):
-                    _log_msg(f"[!] Cảnh báo: Trang bị Cloudflare chặn bot (HTML Challenge).")
-                else:
-                    _log_msg(f"[i] Creator '{creator_slug}' không có bài đăng hoặc feed rỗng.")
             break
         page += 1
 
@@ -540,9 +484,9 @@ def download_masked_hls(playlist_url, filepath, ffmpeg_exe, session=None, progre
                 progress_callback(d, t, spd, pct)
 
     try:
-        r_pl = session.get(playlist_url, timeout=15)
-        r_pl.raise_for_status()
-        playlist_text = r_pl.text
+        req = urllib.request.Request(playlist_url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            playlist_text = resp.read().decode('utf-8', errors='ignore')
     except Exception as e:
         return False, str(e)
 
@@ -1431,133 +1375,80 @@ def upload_to_google_drive(local_dir, remote_name="gg", drive_folder="18TUBE", p
     except Exception as e:
         return False, str(e)
 
-def cloud_download_and_upload_creator(
-    creator_slug,
-    quality="best",
-    drive_remote="gg",
-    drive_folder="18TUBE",
-    auto_clean=True,
-    limit=0,
-    dl_photos=True,
-    dl_videos=True,
-    photo_threads=6,
-    video_threads=2,
-    progress_callback=None,
-    cancel_check=None,
-    log_callback=None
-):
+def check_creator_on_drive(creator_slug, country="", drive_remote="gg", drive_folder="18TUBE", timeout=15):
     """
-    Tiến trình độc lập tải Creator và đẩy trực tiếp lên Google Drive trên Cloud:
-    - Quét danh sách ảnh & video từ 18tube.nl
-    - Tải về thư mục đệm tạm thời
-    - Đẩy toàn bộ lên Google Drive qua Rclone
-    - Nếu auto_clean=True: Tự động xóa sạch thư mục đệm để không tốn 1 byte ổ cứng
+    Kiểm tra danh sách media của creator trên Google Drive qua Rclone.
+    Trả về dict:
+    {
+        "exists": bool,
+        "remote_path": str,
+        "photo_keys": set(),
+        "video_keys": set(),
+        "total_files": int
+    }
     """
-    def _log(msg):
-        if log_callback:
-            log_callback(msg)
-        else:
-            print(msg)
+    rc = get_rclone_path()
+    c_sub = f"/{country.strip('/')}" if country else ""
+    remote_path = f"{drive_remote}:{drive_folder}{c_sub}/{creator_slug}".strip("/")
 
-    # 1. Quét danh sách media
-    _log(f"[*] Đang quét danh sách media của {creator_slug}...")
-    def _scan_cb(page, new_items=0, tot_p=0, tot_v=0):
-        _log(f"  -> Quét trang {page}: tìm thấy {new_items} mục mới (Tổng: {tot_p} ảnh, {tot_v} video)")
-
-    photos, videos = collect_media_items(
-        creator_slug,
-        progress_callback=_scan_cb,
-        cancel_check=cancel_check,
-        log_callback=_log
-    )
-
-    if cancel_check and cancel_check():
-        return False, "cancelled", {}
-
-    photos_to_dl = photos[:limit] if (limit > 0 and dl_photos) else (photos if dl_photos else [])
-    videos_to_dl = videos[:limit] if (limit > 0 and dl_videos) else (videos if dl_videos else [])
-
-    total_media = len(photos_to_dl) + len(videos_to_dl)
-    if total_media == 0:
-        return False, "Không có ảnh hoặc video nào để tải", {}
-
-    _log(f"[+] Đã quét xong: {len(photos_to_dl)} ảnh, {len(videos_to_dl)} video. Bắt đầu tải...")
-
-    # Thư mục đệm tạm thời
-    temp_creator_base = tempfile.mkdtemp(prefix=f"18tube_cloud_{creator_slug}_")
-    photos_dir = os.path.join(temp_creator_base, "photos")
-    videos_dir = os.path.join(temp_creator_base, "videos")
-
-    ffmpeg_exe = get_ffmpeg_path() if videos_to_dl else None
-    success_p = 0
-    success_v = 0
-    current_done = 0
+    res_data = {
+        "exists": False,
+        "remote_path": remote_path,
+        "photo_keys": set(),
+        "video_keys": set(),
+        "total_files": 0
+    }
 
     try:
-        # Tải photos
-        if photos_to_dl and not (cancel_check and cancel_check()):
-            os.makedirs(photos_dir, exist_ok=True)
-            p_session = create_optimized_session(photo_threads * 2)
-            with ThreadPoolExecutor(max_workers=photo_threads) as executor:
-                futs = {executor.submit(download_photo, it, photos_dir, p_session, cancel_check=cancel_check): it for it in photos_to_dl}
-                for f in as_completed(futs):
-                    if cancel_check and cancel_check():
-                        break
-                    ok, _, _ = f.result()
-                    current_done += 1
-                    if ok:
-                        success_p += 1
-                    if progress_callback:
-                        progress_callback(current_done, total_media, f"Ảnh ({success_p}/{len(photos_to_dl)})")
-
-        # Tải videos
-        if videos_to_dl and not (cancel_check and cancel_check()):
-            os.makedirs(videos_dir, exist_ok=True)
-            v_session = create_optimized_session(video_threads * 4)
-            with ThreadPoolExecutor(max_workers=video_threads) as executor:
-                futs = {executor.submit(download_video, it, videos_dir, ffmpeg_exe, quality=quality, session=v_session, cancel_check=cancel_check): it for it in videos_to_dl}
-                for f in as_completed(futs):
-                    if cancel_check and cancel_check():
-                        break
-                    ok, _, _ = f.result()
-                    current_done += 1
-                    if ok:
-                        success_v += 1
-                    if progress_callback:
-                        progress_callback(current_done, total_media, f"Video ({success_v}/{len(videos_to_dl)})")
-
-        if cancel_check and cancel_check():
-            shutil.rmtree(temp_creator_base, ignore_errors=True)
-            return False, "cancelled", {}
-
-        _log(f"[✓] Tải đệm hoàn tất: {success_p} ảnh, {success_v} video. Bắt đầu đẩy lên Google Drive...")
-
-        # Đẩy lên Google Drive
-        drive_dest = f"{drive_folder}/{creator_slug}".strip("/")
-        def _up_prog_cb(pct, spd, tf, eta, f_info):
-            if progress_callback:
-                progress_callback(total_media, total_media, f"Đang đẩy lên Drive ({pct}%, {spd})")
-
-        ok_up, msg_up = upload_to_google_drive(
-            temp_creator_base,
-            remote_name=drive_remote,
-            drive_folder=drive_dest,
-            progress_callback=_up_prog_cb,
-            cancel_check=cancel_check,
-            log_callback=_log
+        proc = subprocess.run(
+            [rc, "lsf", "-R", "--files-only", remote_path, "--drive-pacer-min-sleep", "10ms"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **SUBPROCESS_EXTRA
         )
+        if proc.returncode != 0:
+            return res_data
 
-        return ok_up, msg_up, {
-            "slug": creator_slug,
-            "photos_count": success_p,
-            "videos_count": success_v,
-            "drive_dest": drive_dest
-        }
+        lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+        if not lines:
+            return res_data
 
-    finally:
-        if auto_clean:
-            shutil.rmtree(temp_creator_base, ignore_errors=True)
-            _log(f"[🗑️] Đã dọn dẹp sạch toàn bộ bộ nhớ đệm tạm của {creator_slug}.")
+        res_data["exists"] = True
+        res_data["total_files"] = len(lines)
+        for line in lines:
+            f_clean = line.replace("\\", "/").strip()
+            fname = os.path.basename(f_clean)
+            key, ext = os.path.splitext(fname)
+            if not key:
+                continue
+            ext_l = ext.lower()
+            if f_clean.startswith("photos/") or ext_l in [".jpg", ".jpeg", ".webp", ".png"]:
+                res_data["photo_keys"].add(key)
+            elif f_clean.startswith("videos/") or ext_l in [".mp4", ".mkv", ".ts"]:
+                res_data["video_keys"].add(key)
+
+        return res_data
+    except Exception:
+        return res_data
+
+COUNTRY_OPTIONS = [
+    ("🇻🇳 Việt Nam (_Vietnam)", "_Vietnam"),
+    ("🇦🇺 Úc (_Australia)", "_Australia"),
+    ("🇨🇳 Trung Quốc (_China)", "_China"),
+    ("🇮🇩 Indonesia (_Indonesia)", "_Indonesia"),
+    ("🇯🇵 Nhật Bản (_Japan)", "_Japan"),
+    ("🇰🇷 Hàn Quốc (_Korea)", "_Korea"),
+    ("🇲🇾 Malaysia (_Malaysia)", "_Malaysia"),
+    ("🇵🇱 Ba Lan (_Poland)", "_Poland"),
+    ("🇷🇺 Nga (_Russia)", "_Russia"),
+    ("🇸🇬 Singapore (_Singapore)", "_Singapore"),
+    ("🇹🇼 Đài Loan (_Taiwan)", "_Taiwan"),
+    ("🇹🇭 Thái Lan (_Thailand)", "_Thailand"),
+    ("🇬🇧 Anh (_UK)", "_UK"),
+    ("🇺🇸 Mỹ (_USA)", "_USA"),
+    ("📁 Thư mục gốc (Không phân loại)", "")
+]
 
 def main():
     parser = argparse.ArgumentParser(description="18TUBE Photos & Videos Downloader (Tốc độ cao)")
@@ -1571,16 +1462,24 @@ def main():
     parser.add_argument("--video-threads", type=int, default=2, help="Số luồng tải video song song (mặc định: 2)")
     parser.add_argument("--check", action="store_true", help="Kiểm tra xem đã tải đủ file hay chưa")
     parser.add_argument("--upload-drive", action="store_true", help="Tải thư mục lên Google Drive qua rclone")
-    parser.add_argument("--auto-clean", action="store_true", help="Tự động xóa thư mục cục bộ sau khi tải lên Google Drive thành công (tiết kiệm 100% dung lượng đĩa)")
+    parser.add_argument("--auto-clean", action="store_true", help="Tự động xóa thư mục cục bộ sau khi tải lên Google Drive thành công (giải phóng toàn bộ dung lượng đĩa)")
+    parser.add_argument("--country", default="_Vietnam", help="Thư mục quốc gia trên Google Drive (ví dụ: _Vietnam, _Japan, _USA)")
     parser.add_argument("--drive-remote", default="gg", help="Tên remote rclone của Google Drive (mặc định: gg)")
     parser.add_argument("--drive-folder", default="18TUBE", help="Thư mục đích trên Google Drive (mặc định: 18TUBE)")
     parser.add_argument("--gui", action="store_true", help="Khởi động giao diện đồ họa (GUI)")
     args = parser.parse_args()
 
     if args.gui:
-        import gui
-        gui.launch_gui()
-        return
+        try:
+            import gui
+            gui.launch_gui()
+            return
+        except ImportError:
+            print("[!] Repository 18tube-web là phiên bản Web chuyên dụng, không bao gồm GUI Desktop.")
+            print("[*] Vui lòng sử dụng Web Gallery qua trình duyệt:")
+            print("    👉 Chạy lệnh: python web_server.py (hoặc mở file run_gallery.bat)")
+            print("    👉 Truy cập:  http://localhost:5000/gallery")
+            return
 
     creator_slugs = []
     if args.file and os.path.exists(args.file):
@@ -1695,13 +1594,14 @@ def main():
         print(f"\n[🎉] Xong! Dữ liệu được lưu tại: {os.path.abspath(base_out)}")
 
         if args.upload_drive:
-            print(f"\n[*] Đang chuẩn bị tải thư mục lên Google Drive ({args.drive_remote}:{args.drive_folder}/{creator_slug})...")
+            country_sub = f"/{args.country.strip('/')}" if args.country else ""
+            print(f"\n[*] Đang chuẩn bị tải thư mục lên Google Drive ({args.drive_remote}:{args.drive_folder}{country_sub}/{creator_slug})...")
             ok_auth, msg = check_rclone_remote_auth(args.drive_remote)
             if not ok_auth:
                 print(f"[!] Lỗi xác thực Google Drive: {msg}")
                 print(f"    Vui lòng chạy 'connect_drive.bat' hoặc 'rclone config reconnect {args.drive_remote}:' trước.")
             else:
-                drive_dest = f"{args.drive_folder}/{creator_slug}".strip("/")
+                drive_dest = f"{args.drive_folder}{country_sub}/{creator_slug}".strip("/")
                 print(f"[*] Bắt đầu tải lên: {base_out} -> {args.drive_remote}:{drive_dest} ...")
 
                 def drive_prog(pct, speed, tf, eta):

@@ -10,18 +10,23 @@ dist/
 bin/
 *.exe
 *.pkg
+*.dll
+*.so
+*.dylib
 
-# Cache & Local Data
+# Cache & Local Media & Database (Tránh commit file nặng > 20MB - 100MB)
 .thumbnails/
 downloads/
 scratch/
 tunnel_url.txt
 *.log
-.drive_cache.json
-.drive_cache.json*
-*.db-wal
+*.db
 *.db-shm
+*.db-wal
+.drive_cache*
 
-# IDE & Config
+# IDE & OS Config
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db

@@ -59,15 +59,6 @@
                     <span>Đồng bộ</span>
                 </button>
 
-                <button id="btn-cloud-download" class="btn-cinema-action btn-cloud-dl-btn" title="Tải trực tiếp từ Cloud lên Google Drive (Không tốn dung lượng máy tính)">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    <span>Tải lên Cloud Drive</span>
-                </button>
-
                 <a href="/" class="btn-dashboard-link" title="Mở trang kiểm tra & đối soát source dữ liệu">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="7" height="9" rx="1"></rect>
@@ -288,77 +279,11 @@
         </div>
     </div>
 
-    <!-- CLOUD DOWNLOAD TO GOOGLE DRIVE MODAL -->
-    <div id="cloud-dl-modal" class="cloud-dl-modal" style="display: none;">
-        <div class="cloud-dl-backdrop" id="cloud-dl-backdrop"></div>
-        <div class="cloud-dl-dialog">
-            <div class="cloud-dl-header">
-                <div class="cloud-dl-title-box">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#00f2fe" stroke-width="2.2">
-                        <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
-                    </svg>
-                    <h3>Tải Cloud Trực Tiếp Lên Google Drive</h3>
-                </div>
-                <button type="button" class="cloud-dl-close" id="cloud-dl-close">&times;</button>
-            </div>
-            <div class="cloud-dl-body">
-                <p class="cloud-dl-desc">
-                    ⚡ <strong>Cách 1 (Zero Local Disk):</strong> Máy chủ Cloud sẽ trực tiếp cào dữ liệu, tải media và đẩy thẳng lên Google Drive qua Rclone. <strong>Không tốn 1 byte ổ cứng máy tính cá nhân!</strong> Sau khi tải xong, hệ thống tự động xóa bộ nhớ đệm Cloud và hiển thị ngay trong Gallery.
-                </p>
-
-                <div class="cloud-dl-field">
-                    <label for="cloud-dl-urls"><strong>Link Creator / Profile (Mỗi dòng 1 link):</strong></label>
-                    <textarea id="cloud-dl-urls" rows="4" placeholder="https://18tube.tv/creator/linh-miu&#10;https://18tube.tv/creator/tram-anh"></textarea>
-                    <small>Hỗ trợ đường dẫn creator từ 18tube.tv, 18tube.xyz, hoặc slug creator.</small>
-                </div>
-
-                <div class="cloud-dl-row">
-                    <div class="cloud-dl-col">
-                        <label for="cloud-dl-quality">Chất lượng:</label>
-                        <select id="cloud-dl-quality">
-                            <option value="best" selected>Tốt nhất (Gốc 1080p/4K)</option>
-                            <option value="720p">720p</option>
-                            <option value="480p">480p</option>
-                        </select>
-                    </div>
-                    <div class="cloud-dl-col">
-                        <label for="cloud-dl-folder">Thư mục Drive:</label>
-                        <input type="text" id="cloud-dl-folder" value="18TUBE" placeholder="Ví dụ: 18TUBE">
-                    </div>
-                </div>
-
-                <div class="cloud-dl-checkbox-box">
-                    <label>
-                        <input type="checkbox" id="cloud-dl-autoclean" checked>
-                        <span>Tự động dọn dẹp file tạm trên Cloud ngay khi hoàn tất (Giữ dung lượng 0 bytes)</span>
-                    </label>
-                </div>
-
-                <!-- PROGRESS BOX -->
-                <div id="cloud-dl-progress-box" class="cloud-dl-progress-box" style="display: none;">
-                    <div class="cloud-dl-status-line">
-                        <span id="cloud-dl-step-label">Đang chuẩn bị...</span>
-                        <span id="cloud-dl-pct-label">0%</span>
-                    </div>
-                    <div class="cloud-dl-bar-bg">
-                        <div id="cloud-dl-bar-fill" class="cloud-dl-bar-fill" style="width: 0%;"></div>
-                    </div>
-                    <div id="cloud-dl-log-box" class="cloud-dl-console-log"></div>
-                </div>
-            </div>
-
-            <div class="cloud-dl-footer">
-                <button type="button" id="btn-cloud-dl-stop" class="btn-cloud-cancel" style="display: none;">Dừng tiến trình</button>
-                <button type="button" id="btn-cloud-dl-start" class="btn-cloud-submit">Bắt đầu tải lên Drive</button>
-            </div>
-        </div>
-    </div>
-
     <!-- TOAST NOTIFICATION -->
     <div id="cinema-toast-container" class="cinema-toast-container"></div>
 
     <!-- Video.js Script -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-    <script src="/static/gallery.js?v=8"></script>
+    <script src="/static/gallery.js?v=7"></script>
 </body>
 </html>

@@ -423,6 +423,10 @@
     async function loadDriveSummary(refresh = false) {
         try {
             const res = await fetch(`/api/drive/summary_all?refresh=${refresh ? '1' : '0'}`);
+            if (!res.ok) {
+                console.warn('drive summary_all status:', res.status);
+                return;
+            }
             const data = await res.json();
             if (data.success && data.data) {
                 state.driveSummary = data.data;
@@ -452,10 +456,17 @@
                 renderOverview(data.data);
                 renderDriveSidebar(state.driveCreators);
                 renderVerifyChips(state.driveCreators);
+
+                // Nếu tổng số file đang là 0 hoặc chưa đầy đủ, tự động kiểm tra lại sau 8 giây để cập nhật khi nền quét xong
+                if ((data.data.total_files || 0) < 500 && !window._summary_retry_timer) {
+                    window._summary_retry_timer = setTimeout(() => {
+                        window._summary_retry_timer = null;
+                        loadDriveSummary(false);
+                    }, 8000);
+                }
             }
         } catch (err) {
             console.error('Error fetching drive summary:', err);
-            showToast('Lỗi khi tải danh sách từ Google Drive', 'error');
         }
     }
 
@@ -713,6 +724,21 @@
             if (data.success && data.data) {
                 state.driveFilesData = data.data;
                 renderDriveCreatorDetails(data.data);
+
+                // Cập nhật ngay số lượng file vào danh sách và count-pill ở sidebar
+                const creatorItem = (state.driveCreators || []).find(c => c.slug === slug || (c.name && c.name === slug.split('/').pop()));
+                if (creatorItem) {
+                    creatorItem.photos_count = data.data.photos_count || 0;
+                    creatorItem.videos_count = data.data.videos_count || 0;
+                    creatorItem.total_files = data.data.total_items || 0;
+                    creatorItem.total_size = data.data.total_size || 0;
+                    creatorItem.total_size_str = data.data.total_size_str || '0 B';
+
+                    const itemPill = document.querySelector(`#drive-creator-nav-list .creator-nav-item[data-slug="${slug}"] .count-pill`);
+                    if (itemPill) {
+                        itemPill.textContent = (data.data.total_items || 0).toLocaleString('vi-VN');
+                    }
+                }
             } else {
                 showToast(data.error || 'Lỗi khi tải chi tiết creator', 'error');
             }

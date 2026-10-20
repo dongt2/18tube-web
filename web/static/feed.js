@@ -895,6 +895,21 @@
     }
 
     // -------------------------------------------------------------
+    // RANDOM FEED VIDEO JUMP
+    // -------------------------------------------------------------
+    function jumpToRandomVideo() {
+        if (!container) return;
+        const total = container.children.length;
+        if (total <= 1) return;
+        let randIdx = Math.floor(Math.random() * total);
+        if (randIdx === state.currentIndex) {
+            randIdx = (randIdx + 1) % total;
+        }
+        showToast('🎲 Đang nhảy ngẫu nhiên tới video mới!');
+        scrollToSlide(randIdx);
+    }
+
+    // -------------------------------------------------------------
     // KEYBOARD SHORTCUTS
     // -------------------------------------------------------------
     function handleKeyDown(e) {
@@ -918,6 +933,12 @@
             case 'W':
                 e.preventDefault();
                 scrollToPrevVideo();
+                break;
+
+            case 'r':
+            case 'R':
+                e.preventDefault();
+                jumpToRandomVideo();
                 break;
 
             case ' ': // Spacebar: Play/Pause

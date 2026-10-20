@@ -3030,6 +3030,19 @@ kbd {
     transform: translateY(-1px);
 }
 
+.btn-random-action.active-shuffle {
+    background: linear-gradient(135deg, rgba(254, 44, 85, 0.45), rgba(37, 244, 238, 0.45)) !important;
+    border-color: #25f4ee !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 18px rgba(37, 244, 238, 0.6) !important;
+    animation: randomPulse 2s infinite ease-in-out;
+}
+
+@keyframes randomPulse {
+    0%, 100% { box-shadow: 0 0 14px rgba(37, 244, 238, 0.5); }
+    50% { box-shadow: 0 0 24px rgba(254, 44, 85, 0.8); }
+}
+
 .btn-boss-action {
     background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(239, 68, 68, 0.12)) !important;
     border-color: rgba(245, 158, 11, 0.35) !important;

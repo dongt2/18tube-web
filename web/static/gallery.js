@@ -449,23 +449,95 @@
     }
 
     // ==========================================
-    // 3. RANDOM VIDEO SHUFFLE
+    // 3. RANDOM VIDEO SHUFFLE (SMART SHUFFLE BAG & GLOBAL FALLBACK)
     // ==========================================
-    function playRandomVideo() {
+    const randomPlayback = {
+        pool: [],            // Array of indices to play next without repeat
+        history: [],         // Array of previously played indices in this session
+        active: false,
+        initPool: function (length, currentIdx) {
+            this.pool = [];
+            for (let i = 0; i < length; i++) {
+                if (i !== currentIdx) this.pool.push(i);
+            }
+            // Fisher-Yates shuffle
+            for (let i = this.pool.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [this.pool[i], this.pool[j]] = [this.pool[j], this.pool[i]];
+            }
+        },
+        getNextIndex: function (length, currentIdx) {
+            if (length <= 1) return 0;
+            if (this.pool.length === 0) {
+                this.initPool(length, currentIdx);
+            }
+            const nextIdx = this.pool.pop();
+            this.history.push(nextIdx);
+            if (this.history.length > 50) this.history.shift();
+            return nextIdx;
+        }
+    };
+
+    async function playRandomVideo(autoTriggered = false) {
+        state.isRandomShuffleActive = true;
+        if (elements.btnRandomVideo) {
+            elements.btnRandomVideo.classList.add('active-shuffle');
+        }
+
         const vids = state.videoList && state.videoList.length > 0 ? state.videoList : [];
-        if (vids.length === 0) {
-            showToast('Không có video nào trong danh mục hiện tại để phát ngẫu nhiên', 'warning');
+
+        // 1. Nếu danh sách video hiện tại có sẵn (ít nhất 1 video)
+        if (vids.length > 0) {
+            const randIdx = randomPlayback.getNextIndex(vids.length, state.currentVideoIndex);
+            const chosenVid = vids[randIdx];
+            playTheaterVideo(randIdx);
+
+            const cInfo = getCountryInfo(chosenVid.country);
+            const flag = cInfo.flag || '🎬';
+            const cleanName = (chosenVid.name || '').replace(/\.(mp4|mov|webm|mkv|avi)$/i, '');
+            const creatorTag = chosenVid.creator ? `[${flag} @${chosenVid.creator}] ` : '';
+            showToast(`🎲 ${creatorTag}${cleanName}`, 'info');
             return;
         }
 
-        let randIdx = Math.floor(Math.random() * vids.length);
-        if (vids.length > 1 && randIdx === state.currentVideoIndex) {
-            randIdx = (randIdx + 1) % vids.length;
-        }
+        // 2. Nếu danh sách video rỗng (đang ở tab Ảnh hoặc tìm kiếm không ra video) -> Gọi Server API lấy video ngẫu nhiên toàn thư viện
+        showToast('🎲 Đang tìm video ngẫu nhiên từ kho 18TUBE...', 'info');
+        try {
+            const res = await fetch('/api/media/random');
+            const data = await res.json();
+            if (data.success && data.video) {
+                const raw = data.video;
+                const fId = raw.id || '';
+                const unified = {
+                    id: 'random_' + (fId || Date.now()),
+                    type: 'video',
+                    name: raw.name || 'Random Video',
+                    creator: raw.creator || '',
+                    country: raw.country || '',
+                    size_str: raw.size_str || (raw.size ? formatBytes(raw.size) : ''),
+                    date: raw.mod_time || '',
+                    file_id: fId,
+                    thumbnail_url: raw.thumbnail_url || (fId ? `https://lh3.googleusercontent.com/d/${fId}=w400` : ''),
+                    stream_url: raw.stream_url || (fId ? `/api/media/drive/stream?id=${fId}&name=${encodeURIComponent(raw.name)}` : ''),
+                    drive_url: raw.drive_view_url || (fId ? `https://drive.google.com/file/d/${fId}/view` : ''),
+                    is_local: false
+                };
 
-        const chosenVid = vids[randIdx];
-        playTheaterVideo(randIdx);
-        showToast(`🎲 Đang phát ngẫu nhiên: ${chosenVid.name}`, 'info');
+                if (!state.videoList) state.videoList = [];
+                state.videoList.push(unified);
+                const playIdx = state.videoList.length - 1;
+                playTheaterVideo(playIdx);
+
+                const cInfo = getCountryInfo(unified.country);
+                const flag = cInfo.flag || '🎬';
+                showToast(`🎲 [${flag} @${unified.creator}] ${unified.name}`, 'info');
+            } else {
+                showToast('Chưa có video nào trong kho media', 'warning');
+            }
+        } catch (err) {
+            console.error('Lỗi lấy video ngẫu nhiên:', err);
+            showToast('Không thể kết nối lấy video ngẫu nhiên', 'error');
+        }
     }
 
     // ==========================================
@@ -1788,6 +1860,10 @@
 
     function closeTheater() {
         stopHoverPreview();
+        state.isRandomShuffleActive = false;
+        if (elements.btnRandomVideo) {
+            elements.btnRandomVideo.classList.remove('active-shuffle');
+        }
         elements.theaterModal.classList.remove('active');
         if (vjsPlayer) {
             vjsPlayer.pause();
@@ -1798,6 +1874,10 @@
     }
 
     function playNextVideo() {
+        if (state.isRandomShuffleActive && state.videoList.length > 1) {
+            playRandomVideo(true);
+            return;
+        }
         if (state.currentVideoIndex < state.videoList.length - 1) {
             playTheaterVideo(state.currentVideoIndex + 1);
         } else if (state.isLooping && state.videoList.length > 0) {
@@ -1806,6 +1886,17 @@
     }
 
     function playPrevVideo() {
+        if (state.isRandomShuffleActive && randomPlayback.history.length > 1) {
+            // Lấy video trước đó từ lịch sử random
+            randomPlayback.history.pop(); // Bỏ video hiện tại
+            const prevIdx = randomPlayback.history.pop();
+            if (prevIdx !== undefined && prevIdx >= 0 && prevIdx < state.videoList.length) {
+                playTheaterVideo(prevIdx);
+                const chosenVid = state.videoList[prevIdx];
+                showToast(`⏪ Quay lại ngẫu nhiên: ${chosenVid.name}`, 'info');
+                return;
+            }
+        }
         if (state.currentVideoIndex > 0) {
             playTheaterVideo(state.currentVideoIndex - 1);
         }

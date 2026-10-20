@@ -573,8 +573,112 @@
         }, 320);
     }
 
+    function getPreloadedData() {
+        try {
+            const el = document.getElementById('__PRELOADED_DATA__');
+            if (el && el.textContent) {
+                const text = el.textContent.trim();
+                if (text.length > 5) return JSON.parse(text);
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    function prefetchAdjacentCreators() {
+        if (!state.creators || state.creators.length <= 1) return;
+        const curIdx = state.creators.findIndex(c => (c.slug || c.name) === state.selectedCreator);
+        const nextCreators = [];
+        for (let i = 1; i <= 5; i++) {
+            const nextC = state.creators[(curIdx + i) % state.creators.length];
+            if (nextC) nextCreators.push(nextC);
+        }
+
+        const runPrefetch = () => {
+            nextCreators.forEach((c, idx) => {
+                setTimeout(() => {
+                    const slug = c.slug || c.name;
+                    if (!state.creatorCache[slug]) {
+                        fetch(`/api/drive/creator/${encodeURIComponent(slug)}`)
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.success && data.data) {
+                                    state.creatorCache[slug] = {
+                                        photos: data.data.photos || [],
+                                        videos: data.data.videos || []
+                                    };
+                                    try {
+                                        sessionStorage.setItem('18tube_cmedia_' + slug, JSON.stringify(state.creatorCache[slug]));
+                                    } catch (_) {}
+                                }
+                            }).catch(() => {});
+                    }
+                }, (idx + 1) * 700);
+            });
+        };
+
+        if ('requestIdleCallback' in window) {
+            requestIdleCallback(runPrefetch, { timeout: 3000 });
+        } else {
+            setTimeout(runPrefetch, 1200);
+        }
+    }
+
     async function loadCreators() {
         elements.creatorSelect.innerHTML = '<option value="">Đang tải...</option>';
+
+        // 1. SERVER-SIDE HYDRATION: Nạp trực tiếp từ dữ liệu nhúng sẵn trong HTML (0s, 0 network call)
+        const preloaded = getPreloadedData();
+        if (preloaded && preloaded.creators && preloaded.creators.length > 0) {
+            state.creators = preloaded.creators;
+            state.countries = preloaded.countries || [];
+            if (preloaded.initial_media && preloaded.target_creator) {
+                state.creatorCache[preloaded.target_creator] = {
+                    photos: preloaded.initial_media.photos || [],
+                    videos: preloaded.initial_media.videos || []
+                };
+            }
+            renderCountriesList();
+            renderCreatorsList();
+
+            let targetCreator = preloaded.target_creator || state.creators[0].slug || state.creators[0].name;
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryCreator = urlParams.get('creator');
+            if (queryCreator) {
+                const match = state.creators.find(c => c.slug === queryCreator || c.name === queryCreator || (c.slug && c.slug.endsWith('/' + queryCreator)));
+                if (match) targetCreator = match.slug || match.name;
+            }
+            selectCreator(targetCreator);
+
+            // Bắt đầu prefetch các creator lân cận trong thời gian CPU rảnh
+            prefetchAdjacentCreators();
+            return;
+        }
+
+        // 2. STALE-WHILE-REVALIDATE: Nạp ngay từ sessionStorage / localStorage trong 0ms nếu có
+        if (state.source === 'drive') {
+            try {
+                const cachedRaw = sessionStorage.getItem('18tube_creators_v3') || localStorage.getItem('18tube_creators_v3');
+                if (cachedRaw) {
+                    const parsed = JSON.parse(cachedRaw);
+                    if (parsed && parsed.creators && parsed.creators.length > 0) {
+                        state.creators = parsed.creators || [];
+                        state.countries = parsed.countries || [];
+                        renderCountriesList();
+                        renderCreatorsList();
+
+                        let targetCreator = state.creators[0].slug || state.creators[0].name;
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const queryCreator = urlParams.get('creator');
+                        if (queryCreator) {
+                            const match = state.creators.find(c => c.slug === queryCreator || c.name === queryCreator || (c.slug && c.slug.endsWith('/' + queryCreator)));
+                            if (match) targetCreator = match.slug || match.name;
+                        }
+                        if (targetCreator) selectCreator(targetCreator);
+                    }
+                }
+            } catch (_) {}
+        }
+
         try {
             if (state.source === 'local') {
                 const res = await fetch('/api/local/creators');
@@ -584,12 +688,16 @@
                     state.countries = [{ name: 'Mặc định', count: state.creators.length }];
                 }
             } else {
-                // Tải nhanh danh sách creator và quốc gia từ backend
+                // Tải nhanh danh sách creator và quốc gia từ backend (đã được nén gzip và cache)
                 const res = await fetch('/api/drive/creators');
                 const data = await res.json();
                 if (data.success) {
                     state.creators = data.creators || [];
                     state.countries = data.countries || [];
+                    try {
+                        sessionStorage.setItem('18tube_creators_v3', JSON.stringify(data));
+                        localStorage.setItem('18tube_creators_v3', JSON.stringify(data));
+                    } catch (_) {}
                 }
 
                 // Gọi ngầm summary_all để bổ sung số lượng file trên badge mà không chặn UI
@@ -614,7 +722,7 @@
             renderCreatorsList();
 
             if (state.creators.length > 0) {
-                let targetCreator = state.creators[0].slug || state.creators[0].name;
+                let targetCreator = state.selectedCreator || state.creators[0].slug || state.creators[0].name;
                 const urlParams = new URLSearchParams(window.location.search);
                 const queryCreator = urlParams.get('creator');
                 if (queryCreator) {
@@ -628,7 +736,9 @@
                         }
                     }
                 }
-                selectCreator(targetCreator);
+                if (!state.selectedCreator || state.selectedCreator !== targetCreator) {
+                    selectCreator(targetCreator);
+                }
             } else {
                 elements.cinemaGrid.innerHTML = `
                     <div class="cinema-empty">
@@ -802,12 +912,24 @@
             else chip.classList.remove('active');
         });
 
-        // 1. KIỂM TRA BỘ ĐỆM RAM TRÌNH DUYỆT: MỞ TỨC THÌ 0 GIÂY KHÔNG CẦN CHỜ MẠNG!
+        // 1. KIỂM TRA BỘ ĐỆM RAM & SESSION STORAGE: MỞ TỨC THÌ 0 GIÂY KHÔNG CẦN CHỜ MẠNG!
         if (state.creatorCache[name] && (state.creatorCache[name].photos.length + state.creatorCache[name].videos.length > 0)) {
             const cached = state.creatorCache[name];
             processMediaItems(cached.photos, cached.videos);
             return;
         }
+
+        try {
+            const sessItem = sessionStorage.getItem('18tube_cmedia_' + name);
+            if (sessItem) {
+                const parsed = JSON.parse(sessItem);
+                if (parsed && ((parsed.photos && parsed.photos.length > 0) || (parsed.videos && parsed.videos.length > 0))) {
+                    state.creatorCache[name] = parsed;
+                    processMediaItems(parsed.photos, parsed.videos);
+                    return;
+                }
+            }
+        } catch (_) {}
 
         const label = name === '__all__' ? 'tất cả Creator' : name;
         elements.cinemaGrid.innerHTML = `
@@ -840,12 +962,15 @@
             }
 
             if (resData) {
-                // Chỉ lưu vào RAM trình duyệt nếu có dữ liệu để tránh lưu nhầm cache rỗng
+                // Lưu vào RAM và sessionStorage để mở lại tức thì 0s
                 if ((resData.photos && resData.photos.length > 0) || (resData.videos && resData.videos.length > 0)) {
                     state.creatorCache[name] = {
                         photos: resData.photos || [],
                         videos: resData.videos || []
                     };
+                    try {
+                        sessionStorage.setItem('18tube_cmedia_' + name, JSON.stringify(state.creatorCache[name]));
+                    } catch (_) {}
                 }
                 processMediaItems(resData.photos, resData.videos);
             }
@@ -858,7 +983,7 @@
     function processMediaItems(photos, videos) {
         const unifiedPhotos = (photos || []).map((p, idx) => {
             const fId = p.id || '';
-            const thumbUrl = p.thumbnail_url || (fId ? `https://lh3.googleusercontent.com/d/${fId}=w500` : (p.stream_url || ''));
+            const thumbUrl = p.thumbnail_url || (fId ? `https://lh3.googleusercontent.com/d/${fId}=w400` : (p.stream_url || ''));
             const streamUrl = p.stream_url || (fId ? `/api/media/drive/stream?id=${fId}&name=${encodeURIComponent(p.name)}` : '');
             return {
                 id: 'photo_' + idx,
@@ -879,7 +1004,7 @@
 
         const unifiedVideos = (videos || []).map((v, idx) => {
             const fId = v.id || '';
-            const thumbUrl = v.thumbnail_url || (fId ? `https://lh3.googleusercontent.com/d/${fId}=w500` : (v.full_path ? `/api/media/thumbnail?file=${encodeURIComponent(v.full_path)}` : ''));
+            const thumbUrl = v.thumbnail_url || (fId ? `https://lh3.googleusercontent.com/d/${fId}=w400` : (v.full_path ? `/api/media/thumbnail?file=${encodeURIComponent(v.full_path)}` : ''));
             const streamUrl = v.stream_url || (fId ? `/api/media/drive/stream?id=${fId}&name=${encodeURIComponent(v.name)}` : '');
             return {
                 id: 'video_' + idx,
@@ -918,7 +1043,7 @@
         const isVid = it.type === 'video';
         const badgeClass = isVid ? 'badge-video' : 'badge-photo';
         const badgeText = isVid ? '🎬 VIDEO' : '📸 ẢNH';
-        const thumbSrc = it.thumbnail_url || (it.file_id ? `https://lh3.googleusercontent.com/d/${it.file_id}=w500` : it.stream_url);
+        const thumbSrc = it.thumbnail_url || (it.file_id ? `https://lh3.googleusercontent.com/d/${it.file_id}=w400` : it.stream_url);
         const fallbackSrc = it.file_id ? `/api/media/thumbnail?id=${it.file_id}&proxy=1` : '/static/placeholder.svg';
 
         const isFav = isItemFavorite(it);

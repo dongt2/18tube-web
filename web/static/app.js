@@ -11,8 +11,10 @@
         driveInfo: null,
         driveSummary: null,
         driveCreators: [],
+        driveCreatorCache: {}, // Bộ nhớ đệm RAM lưu chi tiết file của từng creator (mở tức thì 0s)
         selectedDriveCreator: null,
         driveFilesData: null,
+        driveFilesPage: 1, // Phân trang 60 file/trang tránh giật lag DOM
         driveFilter: 'all',
         driveSort: 'name_asc',
         driveSearch: '',
@@ -398,11 +400,76 @@
         }
     }
 
+    function getPreloadedData() {
+        try {
+            const el = document.getElementById('__PRELOADED_DATA__');
+            if (el && el.textContent) {
+                const text = el.textContent.trim();
+                if (text.length > 5) return JSON.parse(text);
+            }
+        } catch (_) {}
+        return null;
+    }
+
     async function loadDriveQuickCreators() {
+        // 1. SERVER-SIDE HYDRATION: Nạp trực tiếp từ dữ liệu nhúng sẵn trong HTML (0s, 0 network call)
+        const preloaded = getPreloadedData();
+        if (preloaded && preloaded.creators && preloaded.creators.length > 0) {
+            state.driveCreators = preloaded.creators;
+            elements.mCreatorsCount.textContent = preloaded.creators.length;
+            elements.overviewBadge.textContent = `${preloaded.creators.length} Creator`;
+            elements.tabDriveCount.textContent = preloaded.creators.length;
+            elements.driveSidebarCount.textContent = preloaded.creators.length;
+
+            if (preloaded.summary && preloaded.summary.total_files) {
+                state.driveSummary = preloaded.summary;
+                renderOverview(preloaded.summary);
+            } else {
+                renderOverviewCountryRibbon(preloaded.creators);
+                renderDriveSidebar(preloaded.creators);
+                renderVerifyChips(preloaded.creators);
+                renderOverviewCards(preloaded.creators);
+            }
+            return;
+        }
+
+        // 2. STALE-WHILE-REVALIDATE: Nạp tức thì 0s từ sessionStorage / localStorage
+        try {
+            const cachedRaw = sessionStorage.getItem('18tube_creators_v3') || localStorage.getItem('18tube_creators_v3');
+            if (cachedRaw) {
+                const cachedData = JSON.parse(cachedRaw);
+                if (cachedData && cachedData.creators && cachedData.creators.length > 0) {
+                    state.driveCreators = cachedData.creators;
+                    elements.mCreatorsCount.textContent = cachedData.creators.length;
+                    elements.overviewBadge.textContent = `${cachedData.creators.length} Creator`;
+                    elements.tabDriveCount.textContent = cachedData.creators.length;
+                    elements.driveSidebarCount.textContent = cachedData.creators.length;
+                    
+                    if (cachedData.total_files !== undefined && cachedData.total_files > 0) {
+                        elements.mTotalFiles.textContent = cachedData.total_files.toLocaleString('vi-VN');
+                        const pCnt = cachedData.total_photos || 0;
+                        const vCnt = cachedData.total_videos || 0;
+                        elements.mFilesRatio.textContent = `${pCnt.toLocaleString('vi-VN')} Ảnh / ${vCnt.toLocaleString('vi-VN')} Video`;
+                    }
+                    
+                    renderOverviewCountryRibbon(cachedData.creators);
+                    renderDriveSidebar(cachedData.creators);
+                    renderVerifyChips(cachedData.creators);
+                    renderOverviewCards(cachedData.creators);
+                }
+            }
+        } catch (_) {}
+
+        // 2. Tải bản cập nhật mới nhất từ backend (đã nén gzip)
         try {
             const res = await fetch('/api/drive/creators');
             const data = await res.json();
             if (data.success && data.creators && data.creators.length > 0) {
+                try {
+                    sessionStorage.setItem('18tube_creators_v3', JSON.stringify(data));
+                    localStorage.setItem('18tube_creators_v3', JSON.stringify(data));
+                } catch (_) {}
+
                 if (!state.driveSummary) {
                     state.driveCreators = data.creators;
                     elements.mCreatorsCount.textContent = data.creators.length;
@@ -705,6 +772,7 @@
     async function selectDriveCreator(slug) {
         if (!slug) return;
         state.selectedDriveCreator = slug;
+        state.driveFilesPage = 1;
 
         // Cập nhật active sidebar
         document.querySelectorAll('#drive-creator-nav-list .creator-nav-item').forEach(it => {
@@ -718,18 +786,44 @@
         const initial = (creatorObj?.name || slug.split('/').pop() || slug).charAt(0).toUpperCase();
         elements.driveHeroName.textContent = displayName;
         elements.driveHeroAvatar.textContent = initial;
-        elements.driveHeroSub.textContent = `Đang quét dữ liệu chi tiết từ gg:18TUBE/${slug}...`;
+
+        // 1. KIỂM TRA BỘ ĐỆM RAM & SESSION STORAGE: MỞ TỨC THÌ 0 GIÂY KHÔNG CẦN CHỜ MẠNG!
+        if (state.driveCreatorCache && state.driveCreatorCache[slug]) {
+            state.driveFilesData = state.driveCreatorCache[slug];
+            renderDriveCreatorDetails(state.driveCreatorCache[slug]);
+            return;
+        }
+
+        try {
+            const sessItem = sessionStorage.getItem(`18tube_cdetail_${slug}`);
+            if (sessItem) {
+                const parsed = JSON.parse(sessItem);
+                if (parsed && (parsed.photos_count || parsed.total_items)) {
+                    state.driveCreatorCache[slug] = parsed;
+                    state.driveFilesData = parsed;
+                    renderDriveCreatorDetails(parsed);
+                    return;
+                }
+            }
+        } catch (_) {}
+
+        elements.driveHeroSub.textContent = `Đang tải dữ liệu từ gg:18TUBE/${slug}...`;
         elements.driveFilesGrid.innerHTML = `
             <div class="loading-state">
                 <div class="spinner"></div>
-                <span>Đang quét danh sách file trên Google Drive (${displayName})...</span>
+                <span>Đang tải danh sách file (${displayName})...</span>
             </div>
         `;
 
         try {
-            const res = await fetch(`/api/drive/creator/${slug}`);
+            const res = await fetch(`/api/drive/creator/${encodeURIComponent(slug)}`);
             const data = await res.json();
             if (data.success && data.data) {
+                state.driveCreatorCache[slug] = data.data;
+                try {
+                    sessionStorage.setItem(`18tube_cdetail_${slug}`, JSON.stringify(data.data));
+                } catch (_) {}
+
                 state.driveFilesData = data.data;
                 renderDriveCreatorDetails(data.data);
 
@@ -844,12 +938,20 @@
             return;
         }
 
-        elements.driveFilesGrid.innerHTML = files.map(f => {
+        // Tối ưu hóa phân trang: Hiển thị 60 file/trang giúp DOM cực nhẹ và tránh đứng hình
+        const PAGE_SIZE = 60;
+        const totalPages = Math.ceil(files.length / PAGE_SIZE) || 1;
+        if (!state.driveFilesPage || state.driveFilesPage > totalPages) state.driveFilesPage = 1;
+
+        const startIdx = (state.driveFilesPage - 1) * PAGE_SIZE;
+        const pageFiles = files.slice(startIdx, startIdx + PAGE_SIZE);
+
+        let gridHtml = pageFiles.map(f => {
             const isVideo = isVideoFile(f.name);
             const isPhoto = !isVideo;
             const badgeClass = isPhoto ? 'photo' : 'video';
             const badgeText = isPhoto ? 'ẢNH' : 'VIDEO';
-            const thumbSrc = f.thumbnail_url || (f.id ? `https://lh3.googleusercontent.com/d/${f.id}=w500` : f.stream_url);
+            const thumbSrc = f.thumbnail_url || (f.id ? `https://lh3.googleusercontent.com/d/${f.id}=w400` : f.stream_url);
             const fallbackSrc = f.id ? `/api/media/thumbnail?id=${f.id}&proxy=1` : '/static/placeholder.svg';
 
             return `
@@ -881,6 +983,42 @@
                 </div>
             `;
         }).join('');
+
+        if (totalPages > 1) {
+            gridHtml += `
+                <div class="drive-grid-pagination" style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 1.5rem; padding: 1rem 0;">
+                    <button class="btn btn-secondary btn-sm btn-drive-prev" ${state.driveFilesPage <= 1 ? 'disabled style="opacity: 0.5; pointer-events: none;"' : ''}>← Trang trước</button>
+                    <span style="font-size: 0.88rem; color: var(--text-muted); font-weight: 500;">
+                        Trang <strong>${state.driveFilesPage}</strong> / ${totalPages} (${files.length.toLocaleString('vi-VN')} tệp)
+                    </span>
+                    <button class="btn btn-secondary btn-sm btn-drive-next" ${state.driveFilesPage >= totalPages ? 'disabled style="opacity: 0.5; pointer-events: none;"' : ''}>Trang sau →</button>
+                </div>
+            `;
+        }
+
+        elements.driveFilesGrid.innerHTML = gridHtml;
+
+        // Sự kiện phân trang
+        const btnPrev = elements.driveFilesGrid.querySelector('.btn-drive-prev');
+        if (btnPrev) {
+            btnPrev.addEventListener('click', () => {
+                if (state.driveFilesPage > 1) {
+                    state.driveFilesPage--;
+                    renderDriveFilesGrid(files);
+                    elements.driveFilesGrid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        }
+        const btnNext = elements.driveFilesGrid.querySelector('.btn-drive-next');
+        if (btnNext) {
+            btnNext.addEventListener('click', () => {
+                if (state.driveFilesPage < totalPages) {
+                    state.driveFilesPage++;
+                    renderDriveFilesGrid(files);
+                    elements.driveFilesGrid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        }
 
         // Gắn sự kiện phát / xem ảnh trực tiếp từ Google Drive
         elements.driveFilesGrid.querySelectorAll('.file-thumb, .btn-preview-drive-media').forEach(el => {
@@ -1881,21 +2019,20 @@
     // INITIALIZATION
     // ==========================================
 
-    async function init() {
+    function init() {
         initTabs();
         initModals();
         initEventListeners();
         initBatchVerify();
 
-        // 1. Tải nhanh thông tin Drive, Creator list (1-2s) và Local creators song song
-        await Promise.all([
-            loadDriveInfo(),
-            loadDriveQuickCreators(),
-            loadLocalCreators()
-        ]);
+        // 1. Ưu tiên số 1: Tải và hiển thị ngay danh sách Creator (0ms với Stale-While-Revalidate)
+        loadDriveQuickCreators();
 
-        // 2. Chạy tổng hợp số liệu toàn bộ Drive ngầm trong background (không chặn UI)
-        loadDriveSummary();
+        // 2. Chạy ngầm nạp thông tin tài khoản và dung lượng Drive (không chặn giao diện)
+        loadDriveInfo();
+
+        // 3. Tổng hợp số liệu Drive ngầm trong nền
+        setTimeout(() => loadDriveSummary(), 300);
     }
 
     // Run on DOM ready

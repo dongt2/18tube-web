@@ -760,8 +760,6 @@
 
                         <div class="profile-handle-row">
                             <span class="profile-username">${cHandle}</span>
-                            <span class="profile-dot-separator">•</span>
-                            <span class="profile-badge-drive">☁️ Google Drive Source</span>
                         </div>
 
                         <!-- TIKTOK STATS ROW -->

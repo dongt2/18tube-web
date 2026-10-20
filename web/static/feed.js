@@ -89,6 +89,34 @@
         return Math.abs(hash % 9800) + 120;
     }
 
+    function formatVideoTitle(name, creator) {
+        if (!name) return `Video Shorts 4K • @${creator}`;
+        const clean = name.replace(/\.(mp4|mov|webm|mkv|avi)$/i, '');
+        // Nếu tên file là chuỗi số dài (timestamp do drive sinh ra)
+        if (/^\d{10,}$/.test(clean)) {
+            return `Video chất lượng cao • @${creator}`;
+        }
+        return clean;
+    }
+
+    function formatCountryTag(country) {
+        const c = (country || 'Việt Nam').trim();
+        const l = c.toLowerCase();
+        if (l.includes('việt nam') || l.includes('vietnam')) return `🇻🇳 ${c}`;
+        if (l.includes('hàn quốc') || l.includes('korea')) return `🇰🇷 ${c}`;
+        if (l.includes('nhật') || l.includes('japan')) return `🇯🇵 ${c}`;
+        if (l.includes('trung quốc') || l.includes('china')) return `🇨🇳 ${c}`;
+        if (l.includes('mỹ') || l.includes('usa')) return `🇺🇸 ${c}`;
+        return `🌐 ${c}`;
+    }
+
+    function formatTime(sec) {
+        if (!sec || isNaN(sec) || sec < 0) return '00:00';
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
     // -------------------------------------------------------------
     // SOUND & AUTONEXT CONTROLS
     // -------------------------------------------------------------
@@ -164,7 +192,9 @@
         slide.dataset.streamUrl = streamUrl;
         const posterUrl = video.thumbnail_url || (video.id ? `https://lh3.googleusercontent.com/d/${video.id}=w800` : '/static/placeholder.svg');
         const country = video.country || 'Việt Nam';
-        const sizeStr = video.size_str || '';
+        const countryDisplay = formatCountryTag(country);
+        const titleDisplay = formatVideoTitle(video.name, creatorName);
+        const sizeStr = video.size_str ? `4K • ${video.size_str}` : '4K Ultra HD';
 
         // Tên đại diện và avatar cho creator
         const avatarLetter = (creatorName[0] || 'C').toUpperCase();
@@ -261,11 +291,11 @@
                                 </svg>
                             </span>
                         </a>
-                        <span class="slide-country-pill">${country}</span>
+                        <span class="slide-country-pill">${countryDisplay}</span>
                     </div>
 
                     <div class="slide-caption-row">
-                        <span class="slide-filename">${video.name || 'Video 4K'}</span>
+                        <span class="slide-filename">${titleDisplay}</span>
                         ${sizeStr ? `<span class="slide-size-pill">${sizeStr}</span>` : ''}
                     </div>
 
@@ -280,9 +310,12 @@
                     </div>
                 </div>
 
-                <!-- BOTTOM PROGRESS BAR -->
-                <div class="slide-progress-bar-wrap" title="Tua video">
-                    <div class="slide-progress-fill"></div>
+                <!-- BOTTOM PROGRESS BAR SCRUBBER -->
+                <div class="slide-progress-bar-wrap" title="Kéo để tua video">
+                    <div class="slide-progress-fill">
+                        <div class="slide-progress-handle"></div>
+                    </div>
+                    <div class="slide-progress-tooltip">00:00 / 00:00</div>
                 </div>
             </div>
         `;
@@ -352,16 +385,21 @@
                         delete videoEl.dataset.userPaused;
                         videoEl.play().then(() => {
                             playIcon.classList.remove('visible');
-                            disc.classList.add('playing');
+                            playIcon.classList.remove('pulse-fade');
+                            void playIcon.offsetWidth; // Trigger reflow for re-animation
+                            playIcon.classList.add('pulse-fade');
+                            setTimeout(() => playIcon.classList.remove('pulse-fade'), 380);
+                            if (disc) disc.classList.add('playing');
                         }).catch(() => {});
                     } else {
                         videoEl.dataset.userPaused = 'true';
                         videoEl.pause();
+                        playIcon.classList.remove('pulse-fade');
                         playIcon.classList.add('visible');
-                        disc.classList.remove('playing');
+                        if (disc) disc.classList.remove('playing');
                     }
                     clickTimeout = null;
-                }, 300);
+                }, 280);
             }
         });
 
@@ -430,23 +468,95 @@
             });
         }
 
-        // 6. Progress Bar Scrubber
+        // 6. Interactive Scrubber with Dragging & Time Tooltip
+        const progressTooltip = slide.querySelector('.slide-progress-tooltip');
+        let isDraggingProgress = false;
+        let wasPlayingBeforeDrag = false;
+
+        function calcScrubPercent(clientX) {
+            if (!progressWrap) return 0;
+            const rect = progressWrap.getBoundingClientRect();
+            if (rect.width <= 0) return 0;
+            return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        }
+
+        function updateScrubVisual(clientX) {
+            const pct = calcScrubPercent(clientX);
+            if (progressFill) progressFill.style.width = `${pct * 100}%`;
+            if (videoEl.duration) {
+                const curSec = pct * videoEl.duration;
+                if (progressTooltip) {
+                    progressTooltip.textContent = `${formatTime(curSec)} / ${formatTime(videoEl.duration)}`;
+                    const pctClamped = Math.max(0.08, Math.min(0.92, pct));
+                    progressTooltip.style.left = `${pctClamped * 100}%`;
+                }
+            }
+        }
+
         videoEl.addEventListener('timeupdate', () => {
-            if (videoEl.duration && progressFill) {
+            if (!isDraggingProgress && videoEl.duration && progressFill) {
                 const pct = (videoEl.currentTime / videoEl.duration) * 100;
                 progressFill.style.width = `${pct}%`;
             }
         });
 
         if (progressWrap) {
-            progressWrap.addEventListener('click', (e) => {
+            function onDragStart(e) {
                 e.stopPropagation();
-                const rect = progressWrap.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const pct = Math.max(0, Math.min(1, clickX / rect.width));
+                if (e.cancelable) e.preventDefault();
+                isDraggingProgress = true;
+                progressWrap.classList.add('dragging');
+                wasPlayingBeforeDrag = !videoEl.paused;
+                videoEl.pause();
+                const clientX = (e.clientX !== undefined)
+                    ? e.clientX
+                    : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+                updateScrubVisual(clientX);
+
+                window.addEventListener('mousemove', onDragMove);
+                window.addEventListener('touchmove', onDragMove, { passive: false });
+                window.addEventListener('mouseup', onDragEnd);
+                window.addEventListener('touchend', onDragEnd);
+            }
+
+            function onDragMove(e) {
+                if (!isDraggingProgress) return;
+                if (e.cancelable) e.preventDefault();
+                const clientX = (e.clientX !== undefined)
+                    ? e.clientX
+                    : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+                updateScrubVisual(clientX);
+            }
+
+            function onDragEnd(e) {
+                if (!isDraggingProgress) return;
+                isDraggingProgress = false;
+                progressWrap.classList.remove('dragging');
+
+                window.removeEventListener('mousemove', onDragMove);
+                window.removeEventListener('touchmove', onDragMove);
+                window.removeEventListener('mouseup', onDragEnd);
+                window.removeEventListener('touchend', onDragEnd);
+
+                const clientX = (e.clientX !== undefined)
+                    ? e.clientX
+                    : (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : 0);
+                const pct = calcScrubPercent(clientX);
                 if (videoEl.duration) {
                     videoEl.currentTime = pct * videoEl.duration;
                 }
+                if (wasPlayingBeforeDrag) {
+                    videoEl.play().catch(() => {});
+                }
+            }
+
+            progressWrap.addEventListener('mousedown', onDragStart);
+            progressWrap.addEventListener('touchstart', onDragStart, { passive: false });
+
+            // Hover tooltip update
+            progressWrap.addEventListener('mousemove', (e) => {
+                if (isDraggingProgress) return;
+                updateScrubVisual(e.clientX);
             });
         }
 

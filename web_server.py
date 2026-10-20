@@ -2116,4 +2116,5 @@ if __name__ == "__main__":
     print(f" 🚀 18TUBE SOURCE INSPECTOR WEB SERVER READY! (PORT: {port})")
     print(f" 🌐 Truy cập bảng điều khiển: http://0.0.0.0:{port}")
     print(f"==================================================")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    # Kích hoạt use_reloader để tự động nạp lại khi code thay đổi
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=True)

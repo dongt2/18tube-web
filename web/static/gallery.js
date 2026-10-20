@@ -100,6 +100,7 @@
         galleryPagination: document.getElementById('gallery-pagination'),
         galleryTopPagination: document.getElementById('gallery-top-pagination'),
         btnToggleAspect: document.getElementById('btn-toggle-aspect'),
+        creatorProfileCard: document.getElementById('creator-profile-card'),
 
         // New feature elements: Favorites, Random & Boss Mode
         badgeCntFav: document.getElementById('badge-cnt-fav'),
@@ -234,6 +235,14 @@
         if (unit.startsWith('G')) return val * 1024 * 1024 * 1024;
         if (unit.startsWith('T')) return val * 1024 * 1024 * 1024 * 1024;
         return val;
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes || bytes <= 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
     function formatDuration(sec) {
@@ -625,6 +634,243 @@
         }
     }
 
+    // ==========================================
+    // TIKTOK-STYLE CREATOR PROFILE SYSTEM
+    // ==========================================
+    const FOLLOWED_CREATORS_STORAGE_KEY = '18tube_followed_creators';
+    let followedCreators = {};
+    try {
+        const saved = localStorage.getItem(FOLLOWED_CREATORS_STORAGE_KEY);
+        if (saved) followedCreators = JSON.parse(saved);
+    } catch (_) {}
+
+    function isCreatorFollowed(slug) {
+        return !!(slug && followedCreators[slug]);
+    }
+
+    function toggleCreatorFollow(slug) {
+        if (!slug) return false;
+        if (followedCreators[slug]) {
+            delete followedCreators[slug];
+        } else {
+            followedCreators[slug] = true;
+        }
+        try {
+            localStorage.setItem(FOLLOWED_CREATORS_STORAGE_KEY, JSON.stringify(followedCreators));
+        } catch (_) {}
+        updateCreatorChipsFollowed();
+        return isCreatorFollowed(slug);
+    }
+
+    function updateCreatorChipsFollowed() {
+        if (!elements.creatorRibbon) return;
+        elements.creatorRibbon.querySelectorAll('.creator-chip').forEach(chip => {
+            const slug = chip.getAttribute('data-name');
+            const isF = isCreatorFollowed(slug);
+            chip.classList.toggle('is-followed', isF);
+            let heart = chip.querySelector('.creator-follow-icon');
+            if (isF && !heart) {
+                heart = document.createElement('span');
+                heart.className = 'creator-follow-icon';
+                heart.textContent = '❤️ ';
+                chip.prepend(heart);
+            } else if (!isF && heart) {
+                heart.remove();
+            }
+        });
+    }
+
+    function renderCreatorProfile() {
+        if (!elements.creatorProfileCard) return;
+
+        const curSlug = state.selectedCreator;
+        if (!curSlug || curSlug === '__all__') {
+            elements.creatorProfileCard.style.display = 'none';
+            return;
+        }
+
+        const creator = state.creators.find(c => (c.slug || c.name) === curSlug) || {
+            name: curSlug.split('/').pop(),
+            slug: curSlug,
+            country: 'Việt Nam'
+        };
+
+        const cName = creator.name || curSlug.split('/').pop();
+        const cHandle = '@' + cName.toLowerCase().replace(/[^a-z0-9_]/g, '');
+        const cCountry = creator.country || 'Việt Nam';
+        const cCountryInfo = getCountryInfo(cCountry);
+        const cFlag = cCountryInfo.flag || '🇻🇳';
+
+        const vidsCount = state.videoList ? state.videoList.length : (creator.videos_count || 0);
+        const photosCount = state.photoList ? state.photoList.length : (creator.photos_count || 0);
+        const totalCount = vidsCount + photosCount || creator.total_files || 0;
+
+        let totalBytes = 0;
+        if (state.mediaItems && state.mediaItems.length > 0) {
+            state.mediaItems.forEach(it => {
+                totalBytes += parseBytesFromStr(it.size_str) || 0;
+            });
+        }
+        const sizeStr = totalBytes > 0 ? formatBytes(totalBytes) : (creator.total_size_str || 'Đang cập nhật');
+
+        // Tìm ảnh đại diện từ media đầu tiên của creator
+        let avatarUrl = '';
+        if (state.photoList && state.photoList.length > 0) {
+            avatarUrl = state.photoList[0].thumbnail_url || (state.photoList[0].file_id ? `https://lh3.googleusercontent.com/d/${state.photoList[0].file_id}=w400` : '');
+        } else if (state.videoList && state.videoList.length > 0) {
+            avatarUrl = state.videoList[0].thumbnail_url || (state.videoList[0].file_id ? `https://lh3.googleusercontent.com/d/${state.videoList[0].file_id}=w400` : '');
+        }
+
+        const isFollowing = isCreatorFollowed(curSlug);
+        const driveFolderUrl = `https://drive.google.com/drive/search?q=${encodeURIComponent(cName)}`;
+
+        elements.creatorProfileCard.style.display = 'block';
+        elements.creatorProfileCard.innerHTML = `
+            <div class="profile-card-inner">
+                <!-- BLURRED BACKGROUND BANNER -->
+                <div class="profile-banner-bg" style="${avatarUrl ? `background-image: url('${avatarUrl}');` : ''}"></div>
+                <div class="profile-banner-overlay"></div>
+
+                <div class="profile-header-content">
+                    <!-- AVATAR TIKTOK STORY RING -->
+                    <div class="profile-avatar-wrap">
+                        <div class="tiktok-story-ring">
+                            ${avatarUrl ? `
+                                <img src="${avatarUrl}" alt="${cName}" class="profile-avatar-img" onerror="this.onerror=null;this.src='/static/placeholder.svg';">
+                            ` : `
+                                <div class="profile-avatar-initials">${cName.slice(0, 2).toUpperCase()}</div>
+                            `}
+                        </div>
+                        <span class="profile-country-badge" title="${cCountryInfo.name}">${cFlag}</span>
+                    </div>
+
+                    <!-- INFO & IDENTITY -->
+                    <div class="profile-meta-wrap">
+                        <div class="profile-name-row">
+                            <h2 class="profile-display-name">${cName}</h2>
+                            <span class="tiktok-verified-badge" title="Tài khoản Creator đã xác thực">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                </svg>
+                            </span>
+                            <span class="profile-country-pill">${cFlag} ${cCountryInfo.name}</span>
+                        </div>
+
+                        <div class="profile-handle-row">
+                            <span class="profile-username">${cHandle}</span>
+                            <span class="profile-dot-separator">•</span>
+                            <span class="profile-badge-drive">☁️ Google Drive Source</span>
+                        </div>
+
+                        <!-- TIKTOK STATS ROW -->
+                        <div class="profile-stats-grid">
+                            <div class="p-stat-box" id="p-box-vids" title="Bấm để lọc Video">
+                                <span class="p-stat-value">${vidsCount.toLocaleString('vi-VN')}</span>
+                                <span class="p-stat-label">🎬 Video</span>
+                            </div>
+                            <div class="p-stat-box" id="p-box-photos" title="Bấm để lọc Ảnh">
+                                <span class="p-stat-value">${photosCount.toLocaleString('vi-VN')}</span>
+                                <span class="p-stat-label">📸 Ảnh</span>
+                            </div>
+                            <div class="p-stat-box" id="p-box-all" title="Bấm để xem Tất cả">
+                                <span class="p-stat-value">${totalCount.toLocaleString('vi-VN')}</span>
+                                <span class="p-stat-label">📦 Tổng tệp</span>
+                            </div>
+                            <div class="p-stat-box" title="Tổng dung lượng lưu trữ">
+                                <span class="p-stat-value">${sizeStr}</span>
+                                <span class="p-stat-label">💾 Dung lượng</span>
+                            </div>
+                        </div>
+
+                        <div class="profile-bio-text">
+                            <span>✨ Kho media chọn lọc của <strong>${cName}</strong> trên Cloud 18TUBE. Xem phim chuẩn rạp chiếu 4K và tải trực tiếp tốc độ cao.</span>
+                        </div>
+
+                        <!-- ACTION BUTTONS -->
+                        <div class="profile-actions-row">
+                            ${vidsCount > 0 ? `
+                                <button class="btn-profile-tiktok btn-profile-playall" id="btn-profile-playall" title="Phát liên tục tất cả video của creator">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+                                    <span>Phát tất cả Video</span>
+                                </button>
+                            ` : ''}
+
+                            <button class="btn-profile-tiktok btn-profile-follow ${isFollowing ? 'is-following' : ''}" id="btn-profile-follow" title="${isFollowing ? 'Bỏ theo dõi creator này' : 'Theo dõi & lưu creator vào mục yêu thích'}">
+                                <span>${isFollowing ? '❤️ Đang theo dõi' : '🤍 Theo dõi'}</span>
+                            </button>
+
+                            <button class="btn-profile-tiktok btn-profile-share" id="btn-profile-share" title="Sao chép đường link profile TikTok này">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
+                                <span>Chia sẻ</span>
+                            </button>
+
+                            <a href="${driveFolderUrl}" target="_blank" rel="noopener noreferrer" class="btn-profile-tiktok btn-profile-drive" title="Mở thư mục trên Google Drive">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                <span>Mở Drive</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Gắn sự kiện cho các nút hành động trong profile
+        const btnPlayAll = document.getElementById('btn-profile-playall');
+        if (btnPlayAll) {
+            btnPlayAll.addEventListener('click', () => {
+                if (state.videoList && state.videoList.length > 0) {
+                    state.autoNext = true;
+                    if (elements.chkAutoNext) elements.chkAutoNext.checked = true;
+                    playTheaterVideo(0);
+                    showToast(`🎬 Đang phát danh sách ${state.videoList.length} video của ${cName}`, 'info');
+                } else {
+                    showToast('Creator này chưa có video', 'warning');
+                }
+            });
+        }
+
+        const btnFollow = document.getElementById('btn-profile-follow');
+        if (btnFollow) {
+            btnFollow.addEventListener('click', () => {
+                const nowFollow = toggleCreatorFollow(curSlug);
+                btnFollow.classList.toggle('is-following', nowFollow);
+                btnFollow.querySelector('span').textContent = nowFollow ? '❤️ Đang theo dõi' : '🤍 Theo dõi';
+                showToast(nowFollow ? `❤️ Đã theo dõi creator ${cName}` : `Đã bỏ theo dõi ${cName}`);
+            });
+        }
+
+        const btnShare = document.getElementById('btn-profile-share');
+        if (btnShare) {
+            btnShare.addEventListener('click', () => {
+                const shareUrl = `${window.location.origin}/gallery?creator=${encodeURIComponent(curSlug)}`;
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    showToast(`🔗 Đã sao chép link profile TikTok của @${cName}!`, 'info');
+                }).catch(() => {
+                    prompt('Link profile creator:', shareUrl);
+                });
+            });
+        }
+
+        // Bấm vào stat box chuyển tab tương ứng
+        const statVids = document.getElementById('p-box-vids');
+        if (statVids) statVids.addEventListener('click', () => {
+            const tab = document.querySelector('.filter-tab[data-type="video"]');
+            if (tab) tab.click();
+        });
+
+        const statPhotos = document.getElementById('p-box-photos');
+        if (statPhotos) statPhotos.addEventListener('click', () => {
+            const tab = document.querySelector('.filter-tab[data-type="photo"]');
+            if (tab) tab.click();
+        });
+
+        const statAll = document.getElementById('p-box-all');
+        if (statAll) statAll.addEventListener('click', () => {
+            const tab = document.querySelector('.filter-tab[data-type="all"]');
+            if (tab) tab.click();
+        });
+    }
+
     async function loadCreators() {
         elements.creatorSelect.innerHTML = '<option value="">Đang tải...</option>';
 
@@ -885,10 +1131,12 @@
             const slug = c.slug || c.name;
             const dName = c.name || slug;
             const isActive = state.selectedCreator === slug ? 'active' : '';
+            const isF = isCreatorFollowed(slug);
             const cFlagHtml = getCountryFlagHtml(c.country || 'Việt Nam');
+            const followIcon = isF ? '<span class="creator-follow-icon">❤️ </span>' : '';
             return `
-                <span class="creator-chip ${isActive}" data-name="${slug}">
-                    ${cFlagHtml}
+                <span class="creator-chip ${isActive} ${isF ? 'is-followed' : ''}" data-name="${slug}">
+                    ${followIcon}${cFlagHtml}
                     <span>${dName}</span>
                 </span>
             `;
@@ -913,6 +1161,9 @@
             if (chip.getAttribute('data-name') === name) chip.classList.add('active');
             else chip.classList.remove('active');
         });
+
+        // Cập nhật ngay Profile Creator kiểu TikTok
+        renderCreatorProfile();
 
         // 1. KIỂM TRA BỘ ĐỆM RAM & SESSION STORAGE: MỞ TỨC THÌ 0 GIÂY KHÔNG CẦN CHỜ MẠNG!
         if (state.creatorCache[name] && (state.creatorCache[name].photos.length + state.creatorCache[name].videos.length > 0)) {
@@ -1033,6 +1284,7 @@
         elements.badgeCntVideo.textContent = unifiedVideos.length;
         elements.badgeCntPhoto.textContent = unifiedPhotos.length;
         updateFavoritesBadge();
+        renderCreatorProfile();
 
         filterAndRenderGrid();
     }
@@ -1168,6 +1420,15 @@
                 });
                 card.addEventListener('mouseleave', () => {
                     stopHoverPreview();
+                });
+            }
+
+            // Bấm vào tag creator để chuyển ngay đến Profile TikTok của creator đó
+            const tagPill = card.querySelector('.creator-tag-pill');
+            if (tagPill && itObj && itObj.creator) {
+                tagPill.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectCreator(itObj.creator);
                 });
             }
 

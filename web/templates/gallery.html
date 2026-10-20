@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/gallery.css?v=16">
+    <link rel="stylesheet" href="/static/gallery.css?v=17">
 </head>
 <body class="cinema-theme">
     <div id="gallery-app" class="cinema-layout">
@@ -176,6 +176,9 @@
 
         <!-- MAIN MEDIA GALLERY CONTAINER -->
         <main class="gallery-main">
+            <!-- TIKTOK-STYLE CREATOR PROFILE HEADER -->
+            <section class="creator-profile-card" id="creator-profile-card" style="display: none;"></section>
+
             <!-- DEDICATED TOP BAR: STATUS COUNTER & TOP PAGINATION (NEVER TRUNCATED) -->
             <div class="gallery-top-bar" id="gallery-top-bar">
                 <div class="top-bar-left">
@@ -495,6 +498,6 @@
     <!-- Video.js Script -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script id="__PRELOADED_DATA__" type="application/json">{{ preloaded_json or '{}' | safe }}</script>
-    <script src="/static/gallery.js?v=17"></script>
+    <script src="/static/gallery.js?v=18"></script>
 </body>
 </html>

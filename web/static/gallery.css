@@ -47,6 +47,7 @@ body.cinema-theme {
 .gradient-cinema {
     background: linear-gradient(135deg, var(--c-cyan) 0%, var(--c-magenta) 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
@@ -61,8 +62,8 @@ body.cinema-theme {
 .cinema-header {
     height: 66px;
     background: rgba(8, 12, 22, 0.92);
-    backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
     border-bottom: 1px solid var(--c-border);
     display: flex;
     align-items: center;
@@ -178,6 +179,7 @@ body.cinema-theme {
 }
 
 .search-clear-btn {
+    display: none;
     background: transparent;
     border: none;
     color: var(--c-text-dim);
@@ -204,6 +206,7 @@ body.cinema-theme {
     font-weight: 700;
     padding: 0.1rem 0.45rem;
     border-radius: 4px;
+    -webkit-user-select: none;
     user-select: none;
     pointer-events: none;
     flex-shrink: 0;
@@ -311,8 +314,8 @@ body.cinema-theme {
    ========================================================================== */
 .gallery-subbar {
     background: rgba(6, 9, 18, 0.96);
-    backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--c-border);
     position: sticky;
     top: 66px;
@@ -357,6 +360,7 @@ body.cinema-theme {
     white-space: nowrap;
     flex-shrink: 0;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -499,6 +503,7 @@ body.cinema-theme {
     cursor: pointer;
     transition: all 0.2s ease;
     white-space: nowrap;
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -623,6 +628,7 @@ body.cinema-theme {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
+    -webkit-user-select: none;
     user-select: none;
     flex-shrink: 0;
 }
@@ -727,6 +733,7 @@ body.cinema-theme {
    TIKTOK-STYLE CREATOR PROFILE HEADER
    ========================================================================== */
 .creator-profile-card {
+    display: none;
     position: relative;
     margin-bottom: 1.5rem;
     border-radius: 20px;
@@ -940,6 +947,7 @@ body.cinema-theme {
     gap: 0.45rem;
     cursor: pointer;
     transition: transform 0.15s ease;
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -995,6 +1003,7 @@ body.cinema-theme {
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     text-decoration: none;
+    -webkit-user-select: none;
     user-select: none;
     white-space: nowrap;
 }
@@ -1070,8 +1079,8 @@ body.cinema-theme {
     padding: 0.65rem 1.15rem;
     margin-bottom: 1.25rem;
     background: rgba(14, 20, 36, 0.75);
-    backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
@@ -1114,7 +1123,7 @@ body.cinema-theme {
 }
 
 .gallery-top-pagination {
-    display: inline-flex;
+    display: none;
     align-items: center;
     gap: 0.4rem;
 }
@@ -1132,6 +1141,7 @@ body.cinema-theme {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -1235,8 +1245,8 @@ body.cinema-theme {
     border-radius: 6px;
     font-size: 0.65rem;
     font-weight: 700;
-    backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     letter-spacing: 0.03em;
     z-index: 2;
     transition: all 0.2s ease;
@@ -1269,8 +1279,8 @@ body.cinema-theme {
     border-radius: 50%;
     background: rgba(14, 20, 36, 0.55);
     border: 1.5px solid rgba(0, 242, 254, 0.6);
-    backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
     color: #fff;
     display: flex;
     align-items: center;
@@ -1397,6 +1407,7 @@ body.cinema-theme {
     width: 100%;
     height: 100%;
     background: rgba(2, 4, 8, 0.92);
+    -webkit-backdrop-filter: blur(25px);
     backdrop-filter: blur(25px);
 }
 
@@ -1538,8 +1549,8 @@ body.cinema-theme {
     border-radius: 50% !important;
     border: 2px solid rgba(0, 242, 254, 0.85) !important;
     background: rgba(10, 14, 23, 0.75) !important;
-    backdrop-filter: blur(12px) !important;
     -webkit-backdrop-filter: blur(12px) !important;
+    backdrop-filter: blur(12px) !important;
     color: #00f2fe !important;
     box-shadow: 0 0 25px rgba(0, 242, 254, 0.4), inset 0 0 15px rgba(0, 242, 254, 0.2) !important;
     margin-top: -34px !important;
@@ -1642,6 +1653,7 @@ body.cinema-theme {
 /* MENUS (Speed, Quality, etc) */
 .video-js .vjs-menu-content {
     background: rgba(10, 14, 23, 0.95) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
     backdrop-filter: blur(16px) !important;
     border: 1px solid rgba(255, 255, 255, 0.12) !important;
     border-radius: 8px !important;
@@ -1842,6 +1854,7 @@ kbd {
     width: 100%;
     height: 100%;
     background: rgba(3, 5, 10, 0.95);
+    -webkit-backdrop-filter: blur(25px);
     backdrop-filter: blur(25px);
 }
 
@@ -1930,6 +1943,7 @@ kbd {
     justify-content: center;
     overflow: hidden;
     position: relative;
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -1958,6 +1972,7 @@ kbd {
     cursor: pointer;
     z-index: 10;
     transition: all 0.2s ease;
+    -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
 }
 
@@ -2269,8 +2284,8 @@ kbd {
         z-index: 45;
         padding: 0;
         background: rgba(4, 6, 12, 0.94);
-        backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
+        backdrop-filter: blur(20px);
         border-bottom: 1px solid var(--c-border);
     }
 
@@ -2489,6 +2504,7 @@ kbd {
         line-height: 1.35;
         max-height: 2.7em;
         -webkit-line-clamp: 2;
+    line-clamp: 2;
         display: -webkit-box;
         -webkit-box-orient: vertical;
         overflow: hidden;
@@ -2728,7 +2744,7 @@ kbd {
    PAGINATION CONTROLS (60 ITEMS/PAGE)
    ========================================================================== */
 .gallery-pagination {
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
     gap: 0.35rem;
@@ -2738,6 +2754,7 @@ kbd {
     background: rgba(14, 20, 34, 0.85);
     border: 1px solid var(--c-border);
     border-radius: 14px;
+    -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);
     max-width: 960px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -2758,6 +2775,7 @@ kbd {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    -webkit-user-select: none;
     user-select: none;
     gap: 0.25rem;
 }
@@ -2789,6 +2807,7 @@ kbd {
 .page-ellipsis {
     color: var(--c-text-dim);
     padding: 0 0.3rem;
+    -webkit-user-select: none;
     user-select: none;
     font-size: 0.85rem;
 }
@@ -2936,8 +2955,8 @@ kbd {
     gap: 8px;
     padding: 11px 18px;
     background: rgba(10, 15, 28, 0.88);
-    backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
     color: #e2e8f0;
     border: 1px solid rgba(0, 242, 254, 0.4);
     border-radius: 9999px;
@@ -2951,6 +2970,7 @@ kbd {
     visibility: hidden;
     transform: translateY(20px) scale(0.92);
     transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -3060,8 +3080,8 @@ kbd {
     height: 32px;
     border-radius: 50%;
     background: rgba(4, 6, 10, 0.7);
-    backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, 0.18);
     display: flex;
     align-items: center;
@@ -3146,6 +3166,7 @@ kbd {
 
 /* 6. Boss Mode / Privacy Shield Screen (Google Sheets Camouflage) */
 .boss-mode-screen {
+    display: none;
     position: fixed;
     inset: 0;
     z-index: 9999999;
@@ -3155,6 +3176,7 @@ kbd {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    -webkit-user-select: text;
     user-select: text;
 }
 
@@ -3493,8 +3515,8 @@ kbd {
     left: 50%;
     transform: translateX(-50%);
     background: rgba(4, 6, 14, 0.85);
-    backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     border: 1px solid rgba(0, 242, 254, 0.55);
     color: var(--c-cyan);
     font-size: 0.65rem;
@@ -3533,6 +3555,7 @@ kbd {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
+    -webkit-user-select: none;
     user-select: none;
     white-space: nowrap;
 }
@@ -3551,3 +3574,8 @@ kbd {
 }
 
 
+
+/* HELPER CLASSES */
+.hidden-select {
+    display: none !important;
+}

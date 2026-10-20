@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/gallery.css?v=17">
+    <link rel="stylesheet" href="/static/gallery.css?v=18">
 </head>
 <body class="cinema-theme">
     <div id="gallery-app" class="cinema-layout">
@@ -39,7 +39,7 @@
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
                     <input type="text" id="gallery-search" placeholder="Tìm tên ảnh, video, creator... (Nhấn / để tìm)" autocomplete="off">
-                    <button type="button" id="btn-search-clear" class="search-clear-btn" title="Xóa tìm kiếm" style="display: none;">&times;</button>
+                    <button type="button" id="btn-search-clear" class="search-clear-btn" title="Xóa tìm kiếm">&times;</button>
                     <span class="search-shortcut-hint">/</span>
                 </div>
             </div>
@@ -122,8 +122,8 @@
                 </div>
 
                 <!-- HIDDEN SELECTS FOR JAVASCRIPT STATE COMPATIBILITY (REMOVING UI DUPLICATION) -->
-                <select id="country-select" style="display: none;"><option value="all">Tất cả Quốc Gia</option></select>
-                <select id="creator-select" style="display: none;"><option value="">Đang tải...</option></select>
+                <select id="country-select" class="hidden-select"><option value="all">Tất cả Quốc Gia</option></select>
+                <select id="creator-select" class="hidden-select"><option value="">Đang tải...</option></select>
 
                 <!-- RIGHT: SORTING & VIEW SETTINGS -->
                 <div class="toolbar-right-controls">
@@ -186,7 +186,7 @@
         <!-- MAIN MEDIA GALLERY CONTAINER -->
         <main class="gallery-main">
             <!-- TIKTOK-STYLE CREATOR PROFILE HEADER -->
-            <section class="creator-profile-card" id="creator-profile-card" style="display: none;"></section>
+            <section class="creator-profile-card" id="creator-profile-card"></section>
 
             <!-- DEDICATED TOP BAR: STATUS COUNTER & TOP PAGINATION (NEVER TRUNCATED) -->
             <div class="gallery-top-bar" id="gallery-top-bar">
@@ -194,7 +194,7 @@
                     <span class="media-counter-text" id="media-status-text">Đang tải...</span>
                 </div>
                 <div class="top-bar-right">
-                    <div class="gallery-top-pagination" id="gallery-top-pagination" style="display: none;"></div>
+                    <div class="gallery-top-pagination" id="gallery-top-pagination"></div>
                 </div>
             </div>
 
@@ -207,7 +207,7 @@
             </div>
 
             <!-- PAGINATION CONTROLS -->
-            <div class="gallery-pagination" id="gallery-pagination" style="display: none;"></div>
+            <div class="gallery-pagination" id="gallery-pagination"></div>
         </main>
     </div>
 
@@ -318,7 +318,7 @@
     </div>
 
     <!-- BOSS MODE / PRIVACY SHIELD SCREEN -->
-    <div id="boss-mode-screen" class="boss-mode-screen" style="display: none;" aria-hidden="true">
+    <div id="boss-mode-screen" class="boss-mode-screen" aria-hidden="true">
         <div class="boss-sheets-header">
             <div class="boss-sheets-top">
                 <div class="boss-sheets-logo">

@@ -3158,18 +3158,21 @@ kbd {
 
 /* 6. Boss Mode / Privacy Shield Screen (Google Sheets Camouflage) */
 .boss-mode-screen {
-    display: none;
+    display: none !important;
     position: fixed;
     inset: 0;
     z-index: 9999999;
     background: #ffffff;
     color: #202124;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    display: flex;
     flex-direction: column;
     overflow: hidden;
     -webkit-user-select: text;
     user-select: text;
+}
+
+.boss-mode-screen.active {
+    display: flex !important;
 }
 
 .boss-sheets-header {

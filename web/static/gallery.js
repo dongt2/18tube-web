@@ -478,7 +478,9 @@
         isBossModeActive = (typeof forceState === 'boolean') ? forceState : !isBossModeActive;
 
         if (elements.bossModeScreen) {
+            elements.bossModeScreen.classList.toggle('active', isBossModeActive);
             elements.bossModeScreen.style.display = isBossModeActive ? 'flex' : 'none';
+            elements.bossModeScreen.setAttribute('aria-hidden', String(!isBossModeActive));
         }
 
         if (isBossModeActive) {
@@ -2119,7 +2121,12 @@
             });
         }
 
-        // Boss Mode buttons
+        // Boss Mode buttons & initial state guarantee
+        if (elements.bossModeScreen) {
+            elements.bossModeScreen.classList.remove('active');
+            elements.bossModeScreen.style.display = 'none';
+            elements.bossModeScreen.setAttribute('aria-hidden', 'true');
+        }
         if (elements.btnBossMode) {
             elements.btnBossMode.addEventListener('click', (e) => {
                 e.preventDefault();

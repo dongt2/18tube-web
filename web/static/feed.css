@@ -242,7 +242,6 @@ html, body {
     height: 100dvh;
     overflow-y: scroll;
     scroll-snap-type: y mandatory;
-    scrollbar-width: none;
     -ms-overflow-style: none;
 }
 
@@ -776,4 +775,10 @@ html, body {
 
 .sound-icon-on {
     display: none;
+}
+
+@supports (scrollbar-width: none) {
+    .tiktok-feed-container {
+        scrollbar-width: none;
+    }
 }

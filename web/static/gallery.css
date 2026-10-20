@@ -606,7 +606,6 @@ body.cinema-theme {
     scroll-behavior: smooth;
     flex: 1;
     padding: 2px 0;
-    scrollbar-width: none;
     -ms-overflow-style: none;
 }
 
@@ -681,7 +680,6 @@ body.cinema-theme {
     scroll-behavior: smooth;
     flex: 1;
     padding: 2px 0;
-    scrollbar-width: none;
     -ms-overflow-style: none;
 }
 
@@ -2302,7 +2300,6 @@ kbd {
         width: 100%;
         gap: 0.3rem;
         overflow-x: auto;
-        scrollbar-width: none;
         -ms-overflow-style: none;
         padding: 1px 0;
     }
@@ -3573,4 +3570,12 @@ kbd {
 /* HELPER CLASSES */
 .hidden-select {
     display: none !important;
+}
+
+@supports (scrollbar-width: none) {
+    .country-ribbon,
+    .creator-ribbon,
+    .media-type-filters {
+        scrollbar-width: none;
+    }
 }

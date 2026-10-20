@@ -122,8 +122,8 @@
                 </div>
 
                 <!-- HIDDEN SELECTS FOR JAVASCRIPT STATE COMPATIBILITY (REMOVING UI DUPLICATION) -->
-                <select id="country-select" class="hidden-select"><option value="all">Tất cả Quốc Gia</option></select>
-                <select id="creator-select" class="hidden-select"><option value="">Đang tải...</option></select>
+                <select id="country-select" class="hidden-select" title="Chọn quốc gia" aria-label="Chọn quốc gia"><option value="all">Tất cả Quốc Gia</option></select>
+                <select id="creator-select" class="hidden-select" title="Chọn người sáng tạo" aria-label="Chọn người sáng tạo"><option value="">Đang tải...</option></select>
 
                 <!-- RIGHT: SORTING & VIEW SETTINGS -->
                 <div class="toolbar-right-controls">
@@ -237,7 +237,7 @@
             <div class="theater-body">
                 <!-- VIDEO DISPLAY AREA -->
                 <div class="theater-screen-area">
-                    <video id="theater-video" class="video-js vjs-default-skin vjs-big-play-centered" controls autoplay playsinline preload="metadata">
+                    <video id="theater-video" class="video-js vjs-default-skin vjs-big-play-centered" controls autoplay preload="metadata">
                         <p class="vjs-no-js">Trình duyệt không hỗ trợ thẻ video.</p>
                     </video>
                 </div>

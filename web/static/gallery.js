@@ -1636,6 +1636,7 @@
                     controls: true,
                     autoplay: true,
                     preload: 'metadata',
+                    playsinline: true,
                     fluid: false,
                     fill: true,
                     playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],

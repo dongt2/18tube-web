@@ -111,6 +111,10 @@
             const vid = curSlide.querySelector('.tiktok-video');
             if (vid) {
                 vid.muted = muted;
+                vid.defaultMuted = muted;
+                if (!muted && vid.paused && !vid.dataset.userPaused) {
+                    vid.play().catch(() => {});
+                }
             }
         }
         showToast(muted ? '🔇 Đã tắt âm thanh' : '🔊 Đã bật âm thanh');
@@ -172,11 +176,13 @@
             <!-- MAIN VIDEO STAGE -->
             <div class="slide-video-wrap">
                 <video class="tiktok-video" 
+                       src="${streamUrl}"
                        playsinline 
                        webkit-playsinline 
                        x5-playsinline
                        loop 
-                       preload="metadata" 
+                       muted
+                       preload="${index <= 1 ? 'auto' : 'metadata'}" 
                        poster="${posterUrl}">
                     <source src="${streamUrl}" type="video/mp4">
                 </video>
@@ -351,11 +357,13 @@
                 clickTimeout = setTimeout(() => {
                     // Toggle Play / Pause
                     if (videoEl.paused) {
+                        delete videoEl.dataset.userPaused;
                         videoEl.play().then(() => {
                             playIcon.classList.remove('visible');
                             disc.classList.add('playing');
                         }).catch(() => {});
                     } else {
+                        videoEl.dataset.userPaused = 'true';
                         videoEl.pause();
                         playIcon.classList.add('visible');
                         disc.classList.remove('playing');
@@ -475,7 +483,111 @@
     }
 
     // -------------------------------------------------------------
-    // INTERSECTION OBSERVER (SMART AUTOPLAY & SCROLL DETECTION)
+    // SINGLE-ACTIVE-SLIDE VIDEO CONTROLLER
+    // -------------------------------------------------------------
+    let currentActiveIndex = -1;
+
+    function playActiveSlide(index) {
+        if (index < 0 || index >= container.children.length) return;
+
+        // Nếu đã ở slide này, đảm bảo video đang phát trừ khi người dùng chủ động Pause
+        if (currentActiveIndex === index) {
+            const curSlide = container.children[index];
+            if (curSlide) {
+                const vid = curSlide.querySelector('.tiktok-video');
+                if (vid && vid.paused && !vid.dataset.userPaused) {
+                    vid.play().catch(() => {});
+                }
+            }
+            return;
+        }
+
+        currentActiveIndex = index;
+        state.currentIndex = index;
+
+        // 1. DỪNG TRIỆT ĐỂ TOÀN BỘ VIDEO KHÁC (NGĂN CHẶN 100% LỖI PHÁT NGẦM KHI LƯỚT QUA)
+        Array.from(container.children).forEach((slide, i) => {
+            if (i !== index) {
+                const otherVid = slide.querySelector('.tiktok-video');
+                const otherDisc = slide.querySelector('.action-music-disc');
+                const otherPlayIcon = slide.querySelector('.slide-center-play-icon');
+
+                if (otherVid) {
+                    otherVid.pause();
+                    otherVid.currentTime = 0;
+                    delete otherVid.dataset.userPaused;
+                }
+                if (otherDisc) otherDisc.classList.remove('playing');
+                if (otherPlayIcon) otherPlayIcon.classList.remove('visible');
+            }
+        });
+
+        // 2. PHÁT VIDEO MỤC TIÊU
+        const activeSlide = container.children[index];
+        if (!activeSlide) return;
+
+        const activeVid = activeSlide.querySelector('.tiktok-video');
+        const activeDisc = activeSlide.querySelector('.action-music-disc');
+        const activePlayIcon = activeSlide.querySelector('.slide-center-play-icon');
+
+        if (activeVid) {
+            activeVid.muted = state.isMuted;
+            activeVid.defaultMuted = state.isMuted;
+            delete activeVid.dataset.userPaused;
+
+            const playPromise = activeVid.play();
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    // Kiểm tra người dùng còn ở slide này không (tránh race condition khi lướt nhanh)
+                    if (currentActiveIndex === index) {
+                        if (activeDisc) activeDisc.classList.add('playing');
+                        if (activePlayIcon) activePlayIcon.classList.remove('visible');
+                    } else {
+                        // Người dùng đã lướt đi nơi khác -> pause ngay lập tức
+                        activeVid.pause();
+                    }
+                }).catch((err) => {
+                    // Nếu người dùng đã lướt đi nơi khác, bỏ qua
+                    if (currentActiveIndex !== index) return;
+
+                    // Nếu do pause() can thiệp (AbortError), KHÔNG BAO GIỜ gọi lại play()
+                    if (err && err.name === 'AbortError') return;
+
+                    // Trình duyệt chặn autoplay unmuted -> fallback sang muted autoplay
+                    activeVid.muted = true;
+                    activeVid.defaultMuted = true;
+                    activeVid.play().then(() => {
+                        if (currentActiveIndex === index) {
+                            if (activeDisc) activeDisc.classList.add('playing');
+                            if (activePlayIcon) activePlayIcon.classList.remove('visible');
+                        } else {
+                            activeVid.pause();
+                        }
+                    }).catch(() => {
+                        // Hiển thị icon Play to ở giữa để người dùng chạm phát nếu trình duyệt chặn hoàn toàn
+                        if (activePlayIcon) activePlayIcon.classList.add('visible');
+                    });
+                });
+            }
+        }
+
+        // 3. Tải ngầm trước video tiếp theo (preload auto)
+        const nextSlide = container.children[index + 1];
+        if (nextSlide) {
+            const nextVid = nextSlide.querySelector('.tiktok-video');
+            if (nextVid && nextVid.preload !== 'auto') {
+                nextVid.preload = 'auto';
+            }
+        }
+
+        // 4. Nạp thêm video vô tận khi còn cách cuối 3 video
+        if (index >= state.videos.length - 3 && !state.isLoadingMore && state.hasMore) {
+            fetchMoreVideos();
+        }
+    }
+
+    // -------------------------------------------------------------
+    // INTERSECTION OBSERVER & SCROLL SYNC
     // -------------------------------------------------------------
     let observer = null;
 
@@ -484,61 +596,40 @@
 
         observer = new IntersectionObserver((entries) => {
             entries.forEach((entry) => {
-                const slide = entry.target;
-                const vid = slide.querySelector('.tiktok-video');
-                const disc = slide.querySelector('.action-music-disc');
-                const playIcon = slide.querySelector('.slide-center-play-icon');
-                const slideIndex = parseInt(slide.dataset.index, 10);
-
-                if (entry.isIntersecting) {
-                    state.currentIndex = slideIndex;
-                    if (vid) {
-                        vid.muted = state.isMuted;
-                        const playPromise = vid.play();
-                        if (playPromise !== undefined) {
-                            playPromise.then(() => {
-                                if (disc) disc.classList.add('playing');
-                                if (playIcon) playIcon.classList.remove('visible');
-                            }).catch(() => {
-                                // Nếu bị chặn autoplay unmuted thì ép muted và thử lại
-                                vid.muted = true;
-                                vid.play().then(() => {
-                                    if (disc) disc.classList.add('playing');
-                                }).catch(() => {});
-                            });
-                        }
-                    }
-
-                    // Tải ngầm trước (preload) video tiếp theo để lướt không bị khựng
-                    const nextSlide = container.children[slideIndex + 1];
-                    if (nextSlide) {
-                        const nextVid = nextSlide.querySelector('.tiktok-video');
-                        if (nextVid && nextVid.preload !== 'auto') {
-                            nextVid.preload = 'auto';
-                        }
-                    }
-
-                    // Kiểm tra cần tải thêm video vô tận không (khi còn cách cuối 3 video)
-                    if (slideIndex >= state.videos.length - 3 && !state.isLoadingMore && state.hasMore) {
-                        fetchMoreVideos();
-                    }
-                } else {
-                    // Dừng video khi cuộn ra ngoài màn hình để tiết kiệm RAM & CPU
-                    if (vid) {
-                        vid.pause();
-                        if (disc) disc.classList.remove('playing');
+                if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                    const slideIndex = parseInt(entry.target.dataset.index, 10);
+                    if (!isNaN(slideIndex)) {
+                        playActiveSlide(slideIndex);
                     }
                 }
             });
         }, {
             root: container,
-            threshold: 0.65 // Chiếm trên 65% khung hình mới coi là video đang xem
+            threshold: [0.5, 0.75]
         });
 
-        // Đăng ký toàn bộ slide hiện có
         Array.from(container.children).forEach((slide) => {
-            observer.observe(slide);
+            if (slide.classList.contains('tiktok-slide')) {
+                observer.observe(slide);
+            }
         });
+    }
+
+    // Lắng nghe thêm sự kiện Scroll để bắt dính 100% chính xác ngay cả khi cuộn nhanh
+    let scrollDebounceTimer = null;
+    if (container) {
+        container.addEventListener('scroll', () => {
+            if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
+            scrollDebounceTimer = setTimeout(() => {
+                const clientH = container.clientHeight || window.innerHeight;
+                if (clientH > 0) {
+                    const targetIdx = Math.round(container.scrollTop / clientH);
+                    if (targetIdx >= 0 && targetIdx < container.children.length && targetIdx !== currentActiveIndex) {
+                        playActiveSlide(targetIdx);
+                    }
+                }
+            }, 60);
+        }, { passive: true });
     }
 
     // -------------------------------------------------------------
@@ -548,6 +639,7 @@
         if (index < 0 || index >= container.children.length) return;
         const targetSlide = container.children[index];
         if (targetSlide) {
+            playActiveSlide(index);
             targetSlide.scrollIntoView({ behavior: 'smooth' });
         }
     }
@@ -703,6 +795,17 @@
             tabFollowing.classList.toggle('active', mode === 'following');
         }
 
+        // Dừng triệt để toàn bộ video cũ trước khi dọn dẹp container
+        Array.from(container.children).forEach(slide => {
+            const vid = slide.querySelector('.tiktok-video');
+            if (vid) {
+                vid.pause();
+                vid.src = '';
+                vid.load();
+            }
+        });
+        currentActiveIndex = -1;
+
         // Reset feed và nạp lại nguồn video theo tab
         container.innerHTML = `
             <div style="height: 100dvh; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 0.95rem;">
@@ -721,6 +824,8 @@
             if (placeholder && placeholder.tagName === 'DIV' && !placeholder.classList.contains('tiktok-slide')) {
                 placeholder.remove();
             }
+            setupObserver();
+            playActiveSlide(0);
         });
     }
 
@@ -754,9 +859,16 @@
                 container.appendChild(slide);
             });
             setupObserver();
+            // Tự động phát ngay lập tức video đầu tiên
+            setTimeout(() => {
+                playActiveSlide(0);
+            }, 60);
         } else {
             // Fallback gọi API nếu chưa có hydrate
-            fetchMoreVideos();
+            fetchMoreVideos(() => {
+                setupObserver();
+                playActiveSlide(0);
+            });
         }
 
         // Gắn sự kiện giao diện

@@ -105,7 +105,7 @@
     <div id="feed-toast-container" class="feed-toast-container"></div>
 
     <!-- PRELOADED DATA INJECTION (SERVER HYDRATION) -->
-    <script id="__FEED_PRELOADED_DATA__" type="application/json">{{ preloaded_json or '{}' | safe }}</script>
-    <script src="/static/feed.js?v=1"></script>
+    <script id="__FEED_PRELOADED_DATA__" type="application/json">{{ (preloaded_json or '{}') | safe }}</script>
+    <script src="/static/feed.js?v=3"></script>
 </body>
 </html>

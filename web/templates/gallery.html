@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/gallery.css?v=7">
+    <link rel="stylesheet" href="/static/gallery.css?v=11">
 </head>
 <body class="cinema-theme">
     <div id="gallery-app" class="cinema-layout">
@@ -52,6 +52,24 @@
                     <span>Google Drive</span>
                 </div>
 
+                <!-- RANDOM VIDEO SHUFFLE BUTTON -->
+                <button id="btn-random-video" class="btn-cinema-action btn-random-action" title="Phát ngẫu nhiên 1 video trong kho media (Phím tắt: R)">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
+                    </svg>
+                    <span>🎲 Ngẫu nhiên [R]</span>
+                </button>
+
+                <!-- PRIVACY SHIELD / BOSS MODE BUTTON -->
+                <button id="btn-boss-mode" class="btn-cinema-action btn-boss-action" title="Chế độ ngụy trang màn hình công việc khẩn cấp (Phím tắt: B)">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                        <line x1="9" y1="21" x2="9" y2="9"></line>
+                    </svg>
+                    <span>🤫 Sếp tới! [B]</span>
+                </button>
+
                 <button id="btn-refresh-cache" class="btn-cinema-action" title="Làm mới dữ liệu & đồng bộ file mới tức thì">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
@@ -88,6 +106,10 @@
                         <span class="filter-tab-label">📸 Ảnh</span>
                         <span class="count-badge" id="badge-cnt-photo">0</span>
                     </button>
+                    <button class="filter-tab filter-tab-fav" data-type="favorite" title="Xem danh sách ảnh & video đã thả tim">
+                        <span class="filter-tab-label">❤️ Yêu thích</span>
+                        <span class="count-badge" id="badge-cnt-fav">0</span>
+                    </button>
                 </div>
 
                 <!-- CENTER: QUICK DROPDOWNS (COUNTRY & CREATOR) -->
@@ -122,6 +144,11 @@
                             <option value="name-asc">Tên: A → Z</option>
                         </select>
                     </div>
+
+                    <!-- HOVER PREVIEW TOGGLE -->
+                    <button id="btn-toggle-hover-preview" class="hover-preview-toggle-btn active" title="Bật/Tắt xem trước video khi rê chuột (Hover Video Preview)">
+                        <span>👁️ Preview: Bật</span>
+                    </button>
 
                     <!-- DENSITY TOGGLE -->
                     <div class="density-toggles" title="Chuyển đổi kích thước hiển thị thẻ">
@@ -190,6 +217,11 @@
                         <button class="theater-engine-btn active" id="btn-engine-html5" title="Phát trực tiếp qua trình phát Video.js">⚡ Video.js Player</button>
                         <button class="theater-engine-btn" id="btn-engine-drive" title="Xem qua Trình phát Google Drive">☁️ Drive Embed</button>
                     </div>
+                    <!-- THEATER FAVORITE BUTTON -->
+                    <button class="theater-btn-tool" id="btn-theater-fav" title="Thêm/Xóa khỏi danh sách yêu thích">
+                        <span id="theater-fav-icon">🤍</span>
+                        <span id="theater-fav-text">Yêu thích</span>
+                    </button>
                     <button class="theater-btn-tool" id="btn-theater-loop" title="Lặp lại video">🔁 Lặp</button>
                     <button class="theater-btn-tool" id="btn-theater-pip" title="Thu nhỏ hình trong hình (Picture-in-Picture)">⧉ PiP</button>
                     <a id="btn-theater-external" href="#" target="_blank" class="theater-btn-tool" title="Mở trên tab Google Drive mới">↗ Drive Web</a>
@@ -201,7 +233,7 @@
             <div class="theater-body">
                 <!-- VIDEO DISPLAY AREA -->
                 <div class="theater-screen-area">
-                    <video id="theater-video" class="video-js vjs-default-skin vjs-big-play-centered" controls autoplay playsinline preload="auto">
+                    <video id="theater-video" class="video-js vjs-default-skin vjs-big-play-centered" controls autoplay playsinline preload="metadata">
                         <p class="vjs-no-js">Trình duyệt không hỗ trợ thẻ video.</p>
                     </video>
                     <iframe id="theater-drive-iframe" allow="autoplay; fullscreen" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
@@ -231,6 +263,8 @@
                     <kbd>F</kbd> Toàn màn hình
                     <kbd>M</kbd> Tắt tiếng
                     <kbd>N</kbd> Video kế tiếp
+                    <kbd>R</kbd> Ngẫu nhiên
+                    <kbd>B</kbd> Sếp tới
                 </div>
 
                 <div class="theater-speed-group">
@@ -259,6 +293,7 @@
                     <span class="lb-title" id="lb-title">Tên ảnh</span>
                 </div>
                 <div class="lb-actions">
+                    <button class="lb-tool-btn" id="lb-btn-fav" title="Thêm/Xóa khỏi danh sách yêu thích">🤍</button>
                     <button class="lb-tool-btn" id="lb-btn-slideshow" title="Tự động trình chiếu">▶ Trình chiếu</button>
                     <button class="lb-tool-btn" id="lb-btn-zoom-in" title="Phóng to">🔍+</button>
                     <button class="lb-tool-btn" id="lb-btn-zoom-reset" title="Kích thước chuẩn">1:1</button>
@@ -279,11 +314,195 @@
         </div>
     </div>
 
+    <!-- BOSS MODE / PRIVACY SHIELD SCREEN -->
+    <div id="boss-mode-screen" class="boss-mode-screen" style="display: none;" aria-hidden="true">
+        <div class="boss-sheets-header">
+            <div class="boss-sheets-top">
+                <div class="boss-sheets-logo">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="#0F9D58">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H6v-2h6v2zm4-4H6v-2h10v2zm0-4H6V7h10v2z"/>
+                    </svg>
+                </div>
+                <div class="boss-sheets-meta">
+                    <div class="boss-sheets-title-row">
+                        <span class="boss-doc-title">Bao_Cao_Ke_Hoach_Tai_Chinh_Q3-Q4_2026_Final.xlsx</span>
+                        <span class="boss-star-icon">☆</span>
+                        <span class="boss-cloud-save">Đã lưu vào Drive</span>
+                    </div>
+                    <div class="boss-sheets-menubar">
+                        <span>Tệp</span>
+                        <span>Chỉnh sửa</span>
+                        <span>Xem</span>
+                        <span>Chèn</span>
+                        <span>Định dạng</span>
+                        <span>Dữ liệu</span>
+                        <span>Công cụ</span>
+                        <span>Tiện ích</span>
+                        <span>Trợ giúp</span>
+                    </div>
+                </div>
+                <div class="boss-sheets-actions">
+                    <button id="btn-exit-boss-mode" class="boss-exit-btn" title="Thoát chế độ ngụy trang (Phím B hoặc ESC)">
+                        ✕ Trở lại Gallery (Phím B)
+                    </button>
+                    <div class="boss-avatar-user">CTO</div>
+                </div>
+            </div>
+
+            <!-- Sheets Toolbar -->
+            <div class="boss-sheets-toolbar">
+                <span class="tb-btn">↶</span>
+                <span class="tb-btn">↷</span>
+                <span class="tb-btn">🖨️</span>
+                <span class="tb-divider"></span>
+                <span class="tb-btn">100% ▾</span>
+                <span class="tb-divider"></span>
+                <span class="tb-btn">₫</span>
+                <span class="tb-btn">%</span>
+                <span class="tb-btn">.0</span>
+                <span class="tb-divider"></span>
+                <span class="tb-font-select">Roboto ▾</span>
+                <span class="tb-size-select">10 ▾</span>
+                <span class="tb-divider"></span>
+                <span class="tb-btn tb-bold">B</span>
+                <span class="tb-btn tb-italic">I</span>
+                <span class="tb-btn tb-color">A</span>
+                <span class="tb-divider"></span>
+                <span class="tb-btn">▦</span>
+                <span class="tb-btn">∑ ▾</span>
+            </div>
+
+            <!-- Formula Bar -->
+            <div class="boss-formula-bar">
+                <span class="boss-cell-address">E14</span>
+                <span class="boss-fx">fx</span>
+                <input type="text" class="boss-formula-input" value="=SUMIFS(D4:D38, C4:C38, &quot;Q3_Approved&quot;, E4:E38, &quot;>&quot;&amp;150000000)" readonly>
+            </div>
+        </div>
+
+        <!-- Spreadsheet Grid -->
+        <div class="boss-sheets-grid-wrap">
+            <table class="boss-table">
+                <thead>
+                    <tr>
+                        <th class="col-head-corner"></th>
+                        <th class="col-head">A</th>
+                        <th class="col-head">B</th>
+                        <th class="col-head">C</th>
+                        <th class="col-head">D</th>
+                        <th class="col-head">E</th>
+                        <th class="col-head">F</th>
+                        <th class="col-head">G</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="boss-row-title">
+                        <td class="row-num">1</td>
+                        <td colspan="7" class="boss-sheet-heading">BẢNG KÊ KHAI PHÂN BỔ DỰ TOÁN CHI PHÍ HỆ THỐNG MÁY CHỦ & ĐẦU TƯ CÔNG NGHỆ Q3-Q4/2026</td>
+                    </tr>
+                    <tr class="boss-row-hdr">
+                        <td class="row-num">2</td>
+                        <td>MÃ DỰ ÁN</td>
+                        <td>HẠNG MỤC PHẦN CỨNG & CLOUD</td>
+                        <td>BỘ PHẬN ĐỀ XUẤT</td>
+                        <td>NGÂN SÁCH (VNĐ)</td>
+                        <td>THỰC CHI (VNĐ)</td>
+                        <td>TIẾN ĐỘ</td>
+                        <td>TRẠNG THÁI</td>
+                    </tr>
+                    <tr>
+                        <td class="row-num">3</td>
+                        <td>PRJ-CLOUD-01</td>
+                        <td>Nâng cấp Băng thông CDN & NVMe Storage Cluster</td>
+                        <td>Core Infra</td>
+                        <td>450,000,000</td>
+                        <td>425,500,000</td>
+                        <td>94.5%</td>
+                        <td class="status-done">ĐÃ DUYỆT</td>
+                    </tr>
+                    <tr>
+                        <td class="row-num">4</td>
+                        <td>PRJ-DEV-02</td>
+                        <td>License Phần mềm Tối ưu Codec AV1 / HEVC</td>
+                        <td>Video Tech</td>
+                        <td>185,000,000</td>
+                        <td>180,000,000</td>
+                        <td>97.3%</td>
+                        <td class="status-done">ĐÃ DUYỆT</td>
+                    </tr>
+                    <tr>
+                        <td class="row-num">5</td>
+                        <td>PRJ-SEC-03</td>
+                        <td>Hệ thống Bảo vệ Tường lửa & Giám sát Tải AWS/GCP</td>
+                        <td>DevOps & Sec</td>
+                        <td>320,000,000</td>
+                        <td>298,000,000</td>
+                        <td>93.1%</td>
+                        <td class="status-done">ĐÃ DUYỆT</td>
+                    </tr>
+                    <tr>
+                        <td class="row-num">6</td>
+                        <td>PRJ-OPS-04</td>
+                        <td>Chi phí Sao lưu Đám mây Đa vùng (Multi-Region Backup)</td>
+                        <td>Operations</td>
+                        <td>210,000,000</td>
+                        <td>210,000,000</td>
+                        <td>100.0%</td>
+                        <td class="status-done">ĐÃ DUYỆT</td>
+                    </tr>
+                    <tr>
+                        <td class="row-num">7</td>
+                        <td>PRJ-AI-05</td>
+                        <td>Cụm GPU AI Server phân loại dữ liệu tự động</td>
+                        <td>AI Lab</td>
+                        <td>680,000,000</td>
+                        <td>615,000,000</td>
+                        <td>90.4%</td>
+                        <td class="status-pending">ĐANG XỬ LÝ</td>
+                    </tr>
+                    <tr>
+                        <td class="row-num">8</td>
+                        <td>PRJ-UX-06</td>
+                        <td>Kiểm thử Trải nghiệm Tải Trang & Tốc độ Phản hồi 4K</td>
+                        <td>Product Team</td>
+                        <td>95,000,000</td>
+                        <td>88,500,000</td>
+                        <td>93.2%</td>
+                        <td class="status-done">ĐÃ DUYỆT</td>
+                    </tr>
+                    <tr class="boss-row-sum">
+                        <td class="row-num">9</td>
+                        <td colspan="3"><strong>TỔNG CỘNG HẠNG MỤC ĐÃ GIẢI NGÂN (VNĐ)</strong></td>
+                        <td><strong>1,940,000,000</strong></td>
+                        <td class="cell-active"><strong>1,817,000,000</strong></td>
+                        <td><strong>93.6%</strong></td>
+                        <td><strong>ĐẠT TIẾN ĐỘ</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="boss-sheets-bottom-tabs">
+            <span class="sheet-tab active">Báo cáo Q3</span>
+            <span class="sheet-tab">Kế hoạch Q4</span>
+            <span class="sheet-tab">Tổng hợp 2026</span>
+            <span class="sheet-add">+</span>
+        </div>
+    </div>
+
+    <!-- BACK TO TOP FLOATING BUTTON -->
+    <button id="btn-back-to-top" class="btn-back-to-top" title="Cuộn nhanh về đầu trang (Phím Home)" aria-label="Cuộn về đầu trang">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+        <span class="back-to-top-text">Lên đầu</span>
+    </button>
+
     <!-- TOAST NOTIFICATION -->
     <div id="cinema-toast-container" class="cinema-toast-container"></div>
 
     <!-- Video.js Script -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-    <script src="/static/gallery.js?v=7"></script>
+    <script src="/static/gallery.js?v=13"></script>
 </body>
 </html>

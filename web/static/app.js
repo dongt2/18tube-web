@@ -197,77 +197,85 @@
     // UTILITIES & FLAG MAPPING
     // ==========================================
 
-    const COUNTRY_FLAG_MAP = {
-        'việt nam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
-        '_vietnam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
-        'vn': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+    function stripAccents(str) {
+        if (!str) return '';
+        return String(str)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/đ/g, 'd')
+            .replace(/Đ/g, 'D');
+    }
 
-        'anh': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
-        '_uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
-        'uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
-        'gb': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+    const COUNTRIES_LIST = [
+        { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam', aliases: ['vn', 'vietnam', 'viet nam', '_vietnam'] },
+        { iso: 'us', flag: '🇺🇸', name: 'Mỹ', aliases: ['us', 'usa', 'united states', 'my', '_usa', '_us', 'hoa ky'] },
+        { iso: 'gb', flag: '🇬🇧', name: 'Anh', aliases: ['gb', 'uk', 'england', 'united kingdom', 'anh', '_uk', '_gb', 'vuong quoc anh'] },
+        { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc', aliases: ['kr', 'korea', 'south korea', 'han quoc', '_korea', '_kr'] },
+        { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản', aliases: ['jp', 'japan', 'nhat ban', '_japan', '_jp'] },
+        { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc', aliases: ['cn', 'china', 'trung quoc', '_china', '_cn'] },
+        { iso: 'th', flag: '🇹🇭', name: 'Thái Lan', aliases: ['th', 'thailand', 'thai lan', '_thailand', '_th'] },
+        { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan', aliases: ['tw', 'taiwan', 'dai loan', '_taiwan', '_tw'] },
+        { iso: 'my', flag: '🇲🇾', name: 'Malaysia', aliases: ['my', 'malaysia', '_malaysia'] },
+        { iso: 'sg', flag: '🇸🇬', name: 'Singapore', aliases: ['sg', 'singapore', '_singapore'] },
+        { iso: 'id', flag: '🇮🇩', name: 'Indonesia', aliases: ['id', 'indonesia', '_indonesia'] },
+        { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan', aliases: ['pl', 'poland', 'ba lan', '_poland', '_pl'] },
+        { iso: 'au', flag: '🇦🇺', name: 'Úc', aliases: ['au', 'australia', 'uc', '_australia', '_au'] },
+        { iso: 'ru', flag: '🇷🇺', name: 'Nga', aliases: ['ru', 'russia', 'nga', '_russia', '_ru'] },
+        { iso: 'fr', flag: '🇫🇷', name: 'Pháp', aliases: ['fr', 'france', 'phap', '_france', '_fr'] },
+        { iso: 'de', flag: '🇩🇪', name: 'Đức', aliases: ['de', 'germany', 'deutschland', 'duc', '_germany', '_de'] },
+        { iso: 'it', flag: '🇮🇹', name: 'Ý', aliases: ['it', 'italy', 'italia', 'y', '_italy', '_it'] },
+        { iso: 'es', flag: '🇪🇸', name: 'Tây Ban Nha', aliases: ['es', 'spain', 'tay ban nha', '_spain', '_es'] },
+        { iso: 'ca', flag: '🇨🇦', name: 'Canada', aliases: ['ca', 'canada', '_canada', '_ca'] },
+        { iso: 'ph', flag: '🇵🇭', name: 'Philippines', aliases: ['ph', 'philippines', '_philippines', '_ph'] },
+        { iso: 'in', flag: '🇮🇳', name: 'Ấn Độ', aliases: ['in', 'india', 'an do', '_india', '_in'] },
+        { iso: 'br', flag: '🇧🇷', name: 'Brazil', aliases: ['br', 'brazil', 'brasil', '_brazil', '_br'] },
+        { iso: 'mx', flag: '🇲🇽', name: 'Mexico', aliases: ['mx', 'mexico', '_mexico', '_mx'] },
+        { iso: 'nl', flag: '🇳🇱', name: 'Hà Lan', aliases: ['nl', 'netherlands', 'holland', 'ha lan', '_netherlands', '_nl'] },
+        { iso: 'se', flag: '🇸🇪', name: 'Thụy Điển', aliases: ['se', 'sweden', 'thuy dien', '_sweden', '_se'] },
+        { iso: 'ch', flag: '🇨🇭', name: 'Thụy Sĩ', aliases: ['ch', 'switzerland', 'thuy si', '_switzerland', '_ch'] },
+        { iso: 'be', flag: '🇧🇪', name: 'Bỉ', aliases: ['be', 'belgium', 'bi', '_belgium', '_be'] },
+        { iso: 'pt', flag: '🇵🇹', name: 'Bồ Đào Nha', aliases: ['pt', 'portugal', 'bo dao nha', '_portugal', '_pt'] },
+        { iso: 'ar', flag: '🇦🇷', name: 'Argentina', aliases: ['ar', 'argentina', '_argentina', '_ar'] },
+        { iso: 'co', flag: '🇨🇴', name: 'Colombia', aliases: ['co', 'colombia', '_colombia', '_co'] },
+        { iso: 'ua', flag: '🇺🇦', name: 'Ukraine', aliases: ['ua', 'ukraine', '_ukraine', '_ua'] },
+        { iso: 'hk', flag: '🇭🇰', name: 'Hồng Kông', aliases: ['hk', 'hongkong', 'hong kong', 'hong_kong', '_hongkong', '_hong_kong', '_hk'] },
+    ];
 
-        'mỹ': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-        '_usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-        'us': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-        'usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-
-        'hàn quốc': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
-        '_korea': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
-        'kr': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
-
-        'nhật bản': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
-        '_japan': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
-        'jp': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
-
-        'trung quốc': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
-        '_china': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
-        'cn': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
-
-        'thái lan': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
-        '_thailand': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
-        'th': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
-
-        'đài loan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
-        '_taiwan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
-        'tw': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
-
-        'malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
-        '_malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
-        'my': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
-
-        'singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
-        '_singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
-        'sg': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
-
-        'indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
-        '_indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
-        'id': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
-
-        'ba lan': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
-        '_poland': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
-        'pl': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
-
-        'úc': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
-        '_australia': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
-        'au': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
-
-        'nga': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
-        '_russia': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
-        'ru': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
-    };
+    const COUNTRY_LOOKUP_MAP = {};
+    COUNTRIES_LIST.forEach(c => {
+        COUNTRY_LOOKUP_MAP[c.iso.toLowerCase()] = c;
+        COUNTRY_LOOKUP_MAP[c.name.toLowerCase()] = c;
+        COUNTRY_LOOKUP_MAP[stripAccents(c.name.toLowerCase())] = c;
+        c.aliases.forEach(a => {
+            const al = a.toLowerCase();
+            COUNTRY_LOOKUP_MAP[al] = c;
+            COUNTRY_LOOKUP_MAP[stripAccents(al)] = c;
+            const noUnderscore = al.replace(/^_/, '');
+            COUNTRY_LOOKUP_MAP[noUnderscore] = c;
+            COUNTRY_LOOKUP_MAP[stripAccents(noUnderscore)] = c;
+        });
+    });
 
     function getCountryInfo(nameOrCode) {
         if (!nameOrCode || nameOrCode === 'all' || nameOrCode === '__all__') {
             return { iso: '', flag: '🌍', name: 'Tất cả' };
         }
-        const key = String(nameOrCode).trim().toLowerCase();
-        return COUNTRY_FLAG_MAP[key] || { iso: '', flag: '🌐', name: nameOrCode.replace(/^_/, '') };
+        const str = String(nameOrCode).trim();
+        const lower = str.toLowerCase();
+        if (COUNTRY_LOOKUP_MAP[lower]) return COUNTRY_LOOKUP_MAP[lower];
+        
+        const stripped = lower.replace(/^_/, '');
+        if (COUNTRY_LOOKUP_MAP[stripped]) return COUNTRY_LOOKUP_MAP[stripped];
+        
+        const noAcc = stripAccents(stripped);
+        if (COUNTRY_LOOKUP_MAP[noAcc]) return COUNTRY_LOOKUP_MAP[noAcc];
+
+        return { iso: '', flag: '🌐', name: str.replace(/^_/, '') };
     }
 
     function getCountryFlagHtml(nameOrCode) {
         if (!nameOrCode || nameOrCode === 'all') {
-            return '<span>🌍</span>';
+            return '<span class="country-flag-icon">🌍</span>';
         }
         const info = getCountryInfo(nameOrCode);
         if (info.iso) {
@@ -1108,7 +1116,7 @@
                 appVideoPlayerInstance = window.videojs('html5-video-player', {
                     controls: true,
                     autoplay: true,
-                    preload: 'auto',
+                    preload: 'metadata',
                     fluid: false,
                     fill: true,
                     playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2]
@@ -1835,6 +1843,38 @@
             elements.driveStatusCard.title = 'Nhấn để kết nối hoặc cập nhật tài khoản Google Drive';
             elements.driveStatusCard.addEventListener('click', promptDriveConnect);
         }
+
+        // Floating Back to Top button
+        const btnBackToTop = document.getElementById('btn-back-to-top');
+        if (btnBackToTop) {
+            let scrollTicking = false;
+            window.addEventListener('scroll', () => {
+                if (!scrollTicking) {
+                    window.requestAnimationFrame(() => {
+                        if (window.scrollY > 280) {
+                            btnBackToTop.classList.add('visible');
+                        } else {
+                            btnBackToTop.classList.remove('visible');
+                        }
+                        scrollTicking = false;
+                    });
+                    scrollTicking = true;
+                }
+            }, { passive: true });
+
+            btnBackToTop.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        }
+
+        // Quick scroll to top with Home key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Home' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        });
     }
 
     // ==========================================

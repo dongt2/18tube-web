@@ -102,87 +102,107 @@
 
         toastContainer: document.getElementById('cinema-toast-container'),
         galleryPagination: document.getElementById('gallery-pagination'),
+
+        // New feature elements: Favorites, Random & Boss Mode
+        badgeCntFav: document.getElementById('badge-cnt-fav'),
+        btnRandomVideo: document.getElementById('btn-random-video'),
+        btnBossMode: document.getElementById('btn-boss-mode'),
+        btnExitBossMode: document.getElementById('btn-exit-boss-mode'),
+        bossModeScreen: document.getElementById('boss-mode-screen'),
+        btnTheaterFav: document.getElementById('btn-theater-fav'),
+        theaterFavIcon: document.getElementById('theater-fav-icon'),
+        theaterFavText: document.getElementById('theater-fav-text'),
+        lbBtnFav: document.getElementById('lb-btn-fav'),
+        btnToggleHoverPreview: document.getElementById('btn-toggle-hover-preview'),
     };
 
     // ==========================================
     // UTILITIES & FORMATTING
     // ==========================================
 
-    const COUNTRY_FLAG_MAP = {
-        'việt nam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
-        '_vietnam': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
-        'vn': { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam' },
+    function stripAccents(str) {
+        if (!str) return '';
+        return String(str)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/đ/g, 'd')
+            .replace(/Đ/g, 'D');
+    }
 
-        'anh': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
-        '_uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
-        'uk': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
-        'gb': { iso: 'gb', flag: '🇬🇧', name: 'Anh' },
+    const COUNTRIES_LIST = [
+        { iso: 'vn', flag: '🇻🇳', name: 'Việt Nam', aliases: ['vn', 'vietnam', 'viet nam', '_vietnam'] },
+        { iso: 'us', flag: '🇺🇸', name: 'Mỹ', aliases: ['us', 'usa', 'united states', 'my', '_usa', '_us', 'hoa ky'] },
+        { iso: 'gb', flag: '🇬🇧', name: 'Anh', aliases: ['gb', 'uk', 'england', 'united kingdom', 'anh', '_uk', '_gb', 'vuong quoc anh'] },
+        { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc', aliases: ['kr', 'korea', 'south korea', 'han quoc', '_korea', '_kr'] },
+        { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản', aliases: ['jp', 'japan', 'nhat ban', '_japan', '_jp'] },
+        { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc', aliases: ['cn', 'china', 'trung quoc', '_china', '_cn'] },
+        { iso: 'th', flag: '🇹🇭', name: 'Thái Lan', aliases: ['th', 'thailand', 'thai lan', '_thailand', '_th'] },
+        { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan', aliases: ['tw', 'taiwan', 'dai loan', '_taiwan', '_tw'] },
+        { iso: 'my', flag: '🇲🇾', name: 'Malaysia', aliases: ['my', 'malaysia', '_malaysia'] },
+        { iso: 'sg', flag: '🇸🇬', name: 'Singapore', aliases: ['sg', 'singapore', '_singapore'] },
+        { iso: 'id', flag: '🇮🇩', name: 'Indonesia', aliases: ['id', 'indonesia', '_indonesia'] },
+        { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan', aliases: ['pl', 'poland', 'ba lan', '_poland', '_pl'] },
+        { iso: 'au', flag: '🇦🇺', name: 'Úc', aliases: ['au', 'australia', 'uc', '_australia', '_au'] },
+        { iso: 'ru', flag: '🇷🇺', name: 'Nga', aliases: ['ru', 'russia', 'nga', '_russia', '_ru'] },
+        { iso: 'fr', flag: '🇫🇷', name: 'Pháp', aliases: ['fr', 'france', 'phap', '_france', '_fr'] },
+        { iso: 'de', flag: '🇩🇪', name: 'Đức', aliases: ['de', 'germany', 'deutschland', 'duc', '_germany', '_de'] },
+        { iso: 'it', flag: '🇮🇹', name: 'Ý', aliases: ['it', 'italy', 'italia', 'y', '_italy', '_it'] },
+        { iso: 'es', flag: '🇪🇸', name: 'Tây Ban Nha', aliases: ['es', 'spain', 'tay ban nha', '_spain', '_es'] },
+        { iso: 'ca', flag: '🇨🇦', name: 'Canada', aliases: ['ca', 'canada', '_canada', '_ca'] },
+        { iso: 'ph', flag: '🇵🇭', name: 'Philippines', aliases: ['ph', 'philippines', '_philippines', '_ph'] },
+        { iso: 'in', flag: '🇮🇳', name: 'Ấn Độ', aliases: ['in', 'india', 'an do', '_india', '_in'] },
+        { iso: 'br', flag: '🇧🇷', name: 'Brazil', aliases: ['br', 'brazil', 'brasil', '_brazil', '_br'] },
+        { iso: 'mx', flag: '🇲🇽', name: 'Mexico', aliases: ['mx', 'mexico', '_mexico', '_mx'] },
+        { iso: 'nl', flag: '🇳🇱', name: 'Hà Lan', aliases: ['nl', 'netherlands', 'holland', 'ha lan', '_netherlands', '_nl'] },
+        { iso: 'se', flag: '🇸🇪', name: 'Thụy Điển', aliases: ['se', 'sweden', 'thuy dien', '_sweden', '_se'] },
+        { iso: 'ch', flag: '🇨🇭', name: 'Thụy Sĩ', aliases: ['ch', 'switzerland', 'thuy si', '_switzerland', '_ch'] },
+        { iso: 'be', flag: '🇧🇪', name: 'Bỉ', aliases: ['be', 'belgium', 'bi', '_belgium', '_be'] },
+        { iso: 'pt', flag: '🇵🇹', name: 'Bồ Đào Nha', aliases: ['pt', 'portugal', 'bo dao nha', '_portugal', '_pt'] },
+        { iso: 'ar', flag: '🇦🇷', name: 'Argentina', aliases: ['ar', 'argentina', '_argentina', '_ar'] },
+        { iso: 'co', flag: '🇨🇴', name: 'Colombia', aliases: ['co', 'colombia', '_colombia', '_co'] },
+        { iso: 'ua', flag: '🇺🇦', name: 'Ukraine', aliases: ['ua', 'ukraine', '_ukraine', '_ua'] },
+        { iso: 'hk', flag: '🇭🇰', name: 'Hồng Kông', aliases: ['hk', 'hongkong', 'hong kong', 'hong_kong', '_hongkong', '_hong_kong', '_hk'] },
+    ];
 
-        'mỹ': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-        '_usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-        'us': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-        'usa': { iso: 'us', flag: '🇺🇸', name: 'Mỹ' },
-
-        'hàn quốc': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
-        '_korea': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
-        'kr': { iso: 'kr', flag: '🇰🇷', name: 'Hàn Quốc' },
-
-        'nhật bản': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
-        '_japan': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
-        'jp': { iso: 'jp', flag: '🇯🇵', name: 'Nhật Bản' },
-
-        'trung quốc': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
-        '_china': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
-        'cn': { iso: 'cn', flag: '🇨🇳', name: 'Trung Quốc' },
-
-        'thái lan': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
-        '_thailand': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
-        'th': { iso: 'th', flag: '🇹🇭', name: 'Thái Lan' },
-
-        'đài loan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
-        '_taiwan': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
-        'tw': { iso: 'tw', flag: '🇹🇼', name: 'Đài Loan' },
-
-        'malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
-        '_malaysia': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
-        'my': { iso: 'my', flag: '🇲🇾', name: 'Malaysia' },
-
-        'singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
-        '_singapore': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
-        'sg': { iso: 'sg', flag: '🇸🇬', name: 'Singapore' },
-
-        'indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
-        '_indonesia': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
-        'id': { iso: 'id', flag: '🇮🇩', name: 'Indonesia' },
-
-        'ba lan': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
-        '_poland': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
-        'pl': { iso: 'pl', flag: '🇵🇱', name: 'Ba Lan' },
-
-        'úc': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
-        '_australia': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
-        'au': { iso: 'au', flag: '🇦🇺', name: 'Úc' },
-
-        'nga': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
-        '_russia': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
-        'ru': { iso: 'ru', flag: '🇷🇺', name: 'Nga' },
-    };
+    const COUNTRY_LOOKUP_MAP = {};
+    COUNTRIES_LIST.forEach(c => {
+        COUNTRY_LOOKUP_MAP[c.iso.toLowerCase()] = c;
+        COUNTRY_LOOKUP_MAP[c.name.toLowerCase()] = c;
+        COUNTRY_LOOKUP_MAP[stripAccents(c.name.toLowerCase())] = c;
+        c.aliases.forEach(a => {
+            const al = a.toLowerCase();
+            COUNTRY_LOOKUP_MAP[al] = c;
+            COUNTRY_LOOKUP_MAP[stripAccents(al)] = c;
+            const noUnderscore = al.replace(/^_/, '');
+            COUNTRY_LOOKUP_MAP[noUnderscore] = c;
+            COUNTRY_LOOKUP_MAP[stripAccents(noUnderscore)] = c;
+        });
+    });
 
     function getCountryInfo(nameOrCode) {
         if (!nameOrCode || nameOrCode === 'all' || nameOrCode === '__all__') {
             return { iso: '', flag: '🌍', name: 'Tất cả' };
         }
-        const key = String(nameOrCode).trim().toLowerCase();
-        return COUNTRY_FLAG_MAP[key] || { iso: '', flag: '🌐', name: nameOrCode.replace(/^_/, '') };
+        const str = String(nameOrCode).trim();
+        const lower = str.toLowerCase();
+        if (COUNTRY_LOOKUP_MAP[lower]) return COUNTRY_LOOKUP_MAP[lower];
+        
+        const stripped = lower.replace(/^_/, '');
+        if (COUNTRY_LOOKUP_MAP[stripped]) return COUNTRY_LOOKUP_MAP[stripped];
+        
+        const noAcc = stripAccents(stripped);
+        if (COUNTRY_LOOKUP_MAP[noAcc]) return COUNTRY_LOOKUP_MAP[noAcc];
+
+        return { iso: '', flag: '🌐', name: str.replace(/^_/, '') };
     }
 
     function getCountryFlagHtml(nameOrCode) {
         if (!nameOrCode || nameOrCode === 'all') {
-            return '<span style="font-size:1.05rem;">🌍</span>';
+            return '<span class="country-flag-icon">🌍</span>';
         }
         const info = getCountryInfo(nameOrCode);
         if (info.iso) {
-            return `<img class="country-flag-img" src="https://flagcdn.com/28x21/${info.iso}.png" srcset="https://flagcdn.com/56x42/${info.iso}.png 2x" width="20" height="15" alt="${info.name}" onerror="this.outerHTML='<span>${info.flag}</span>'">`;
+            return `<img class="country-flag-img" src="https://flagcdn.com/28x21/${info.iso}.png" srcset="https://flagcdn.com/56x42/${info.iso}.png 2x" width="20" height="15" alt="${info.name}" title="${info.name}" onerror="this.outerHTML='<span>${info.flag}</span>'">`;
         }
         return `<span>${info.flag || '🌐'}</span>`;
     }
@@ -216,6 +236,353 @@
         if (unit.startsWith('G')) return val * 1024 * 1024 * 1024;
         if (unit.startsWith('T')) return val * 1024 * 1024 * 1024 * 1024;
         return val;
+    }
+
+    function formatDuration(sec) {
+        if (!sec || isNaN(sec)) return '00:00';
+        const s = Math.floor(sec);
+        const m = Math.floor(s / 60);
+        const remS = s % 60;
+        const h = Math.floor(m / 60);
+        const remM = m % 60;
+        const pad = (n) => String(n).padStart(2, '0');
+        if (h > 0) return `${h}:${pad(remM)}:${pad(remS)}`;
+        return `${pad(remM)}:${pad(remS)}`;
+    }
+
+    // ==========================================
+    // 1. FAVORITES SYSTEM (PERSISTENT VIA LOCALSTORAGE)
+    // ==========================================
+    const FAV_STORAGE_KEY = '18tube_favorites';
+    let favoritesMap = {};
+
+    function loadFavorites() {
+        try {
+            const raw = localStorage.getItem(FAV_STORAGE_KEY);
+            favoritesMap = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+            favoritesMap = {};
+        }
+        updateFavoritesBadge();
+    }
+
+    function saveFavorites() {
+        try {
+            localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(favoritesMap));
+        } catch (_) {}
+        updateFavoritesBadge();
+    }
+
+    function getItemKey(item) {
+        if (!item) return '';
+        return item.file_id || item.name || item.id || '';
+    }
+
+    function isItemFavorite(item) {
+        const key = getItemKey(item);
+        return Boolean(key && favoritesMap[key]);
+    }
+
+    function toggleItemFavorite(item) {
+        const key = getItemKey(item);
+        if (!key) return false;
+
+        if (favoritesMap[key]) {
+            delete favoritesMap[key];
+            saveFavorites();
+            showToast(`Đã bỏ yêu thích: ${item.name}`, 'info');
+            syncAllFavUI(item, false);
+            return false;
+        } else {
+            favoritesMap[key] = {
+                id: item.id,
+                type: item.type,
+                name: item.name,
+                creator: item.creator || '',
+                country: item.country || '',
+                size_str: item.size_str || '',
+                date: item.date || '',
+                file_id: item.file_id || '',
+                thumbnail_url: item.thumbnail_url || '',
+                stream_url: item.stream_url || '',
+                drive_preview_url: item.drive_preview_url || '',
+                drive_url: item.drive_url || '',
+                is_local: item.is_local || false,
+                favorited_at: Date.now()
+            };
+            saveFavorites();
+            showToast(`❤️ Đã thêm vào danh sách yêu thích!`, 'success');
+            syncAllFavUI(item, true);
+            return true;
+        }
+    }
+
+    function updateFavoritesBadge() {
+        const cnt = Object.keys(favoritesMap).length;
+        if (elements.badgeCntFav) {
+            elements.badgeCntFav.textContent = cnt;
+        }
+    }
+
+    function syncAllFavUI(item, isFav) {
+        const key = getItemKey(item);
+        const curVid = state.videoList[state.currentVideoIndex];
+        if (curVid && getItemKey(curVid) === key) {
+            syncTheaterFavButton(curVid);
+        }
+        const curPhoto = state.photoList[state.currentPhotoIndex];
+        if (curPhoto && getItemKey(curPhoto) === key) {
+            syncLightboxFavButton(curPhoto);
+        }
+        const card = document.querySelector(`.media-card[data-id="${item.id}"]`);
+        if (card) {
+            const favBtn = card.querySelector('.media-card-fav-btn');
+            if (favBtn) {
+                favBtn.classList.toggle('is-fav', isFav);
+                favBtn.title = isFav ? 'Bỏ yêu thích' : 'Thêm vào yêu thích';
+            }
+        }
+    }
+
+    function syncTheaterFavButton(vid) {
+        if (!elements.btnTheaterFav) return;
+        const isFav = isItemFavorite(vid);
+        elements.btnTheaterFav.classList.toggle('is-fav', isFav);
+        if (elements.theaterFavIcon) elements.theaterFavIcon.textContent = isFav ? '❤️' : '🤍';
+        if (elements.theaterFavText) elements.theaterFavText.textContent = isFav ? 'Đã thích' : 'Yêu thích';
+    }
+
+    function syncLightboxFavButton(photo) {
+        if (!elements.lbBtnFav) return;
+        const isFav = isItemFavorite(photo);
+        elements.lbBtnFav.classList.toggle('is-fav', isFav);
+        elements.lbBtnFav.textContent = isFav ? '❤️' : '🤍';
+    }
+
+    // ==========================================
+    // 2. VIDEO WATCH PROGRESS (RESUME PLAYBACK)
+    // ==========================================
+    const PROGRESS_STORAGE_KEY = '18tube_progress';
+    let progressMap = {};
+
+    function loadProgress() {
+        try {
+            const raw = localStorage.getItem(PROGRESS_STORAGE_KEY);
+            progressMap = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+            progressMap = {};
+        }
+    }
+
+    function saveProgress(item, time, duration) {
+        const key = getItemKey(item);
+        if (!key || !duration || duration <= 0 || isNaN(time)) return;
+
+        const pct = Math.min(100, Math.max(0, (time / duration) * 100));
+
+        // If watched more than 95%, clear progress
+        if (pct >= 95) {
+            delete progressMap[key];
+        } else if (time > 5) {
+            progressMap[key] = {
+                time: Math.floor(time),
+                duration: Math.floor(duration),
+                pct: Math.round(pct),
+                updated: Date.now()
+            };
+        }
+
+        try {
+            localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(progressMap));
+        } catch (_) {}
+
+        // Update progress bar on card if rendered
+        const card = document.querySelector(`.media-card[data-id="${item.id}"]`);
+        if (card) {
+            let barWrap = card.querySelector('.media-progress-bar-wrap');
+            if (pct >= 95) {
+                if (barWrap) barWrap.remove();
+            } else if (pct > 2) {
+                if (!barWrap) {
+                    const poster = card.querySelector('.media-poster-box');
+                    if (poster) {
+                        barWrap = document.createElement('div');
+                        barWrap.className = 'media-progress-bar-wrap';
+                        barWrap.innerHTML = '<div class="media-progress-bar-fill"></div>';
+                        poster.appendChild(barWrap);
+                    }
+                }
+                if (barWrap) {
+                    barWrap.title = `Đã xem: ${Math.round(pct)}% (${formatDuration(time)})`;
+                    const fill = barWrap.querySelector('.media-progress-bar-fill');
+                    if (fill) fill.style.width = `${pct}%`;
+                }
+            }
+        }
+    }
+
+    function clearProgress(item) {
+        const key = getItemKey(item);
+        if (key && progressMap[key]) {
+            delete progressMap[key];
+            try {
+                localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(progressMap));
+            } catch (_) {}
+            const card = document.querySelector(`.media-card[data-id="${item.id}"]`);
+            if (card) {
+                const barWrap = card.querySelector('.media-progress-bar-wrap');
+                if (barWrap) barWrap.remove();
+            }
+        }
+    }
+
+    function getSavedProgress(item) {
+        const key = getItemKey(item);
+        return (key && progressMap[key]) ? progressMap[key] : null;
+    }
+
+    // ==========================================
+    // 3. RANDOM VIDEO SHUFFLE
+    // ==========================================
+    function playRandomVideo() {
+        const vids = state.videoList && state.videoList.length > 0 ? state.videoList : [];
+        if (vids.length === 0) {
+            showToast('Không có video nào trong danh mục hiện tại để phát ngẫu nhiên', 'warning');
+            return;
+        }
+
+        let randIdx = Math.floor(Math.random() * vids.length);
+        if (vids.length > 1 && randIdx === state.currentVideoIndex) {
+            randIdx = (randIdx + 1) % vids.length;
+        }
+
+        const chosenVid = vids[randIdx];
+        playTheaterVideo(randIdx);
+        showToast(`🎲 Đang phát ngẫu nhiên: ${chosenVid.name}`, 'info');
+    }
+
+    // ==========================================
+    // 4. BOSS MODE / PRIVACY SHIELD
+    // ==========================================
+    let isBossModeActive = false;
+    let savedOriginalTitle = document.title;
+
+    function toggleBossMode(forceState) {
+        isBossModeActive = (typeof forceState === 'boolean') ? forceState : !isBossModeActive;
+
+        if (elements.bossModeScreen) {
+            elements.bossModeScreen.style.display = isBossModeActive ? 'flex' : 'none';
+        }
+
+        if (isBossModeActive) {
+            // Mute and pause playback immediately
+            if (vjsPlayer) {
+                vjsPlayer.pause();
+                vjsPlayer.muted(true);
+            }
+            if (elements.theaterVideo) {
+                elements.theaterVideo.pause();
+                elements.theaterVideo.muted = true;
+            }
+            if (elements.theaterDriveIframe && elements.theaterDriveIframe.src) {
+                elements.theaterDriveIframe.setAttribute('data-saved-src', elements.theaterDriveIframe.src);
+                elements.theaterDriveIframe.src = '';
+            }
+
+            savedOriginalTitle = document.title;
+            document.title = 'Bao_Cao_Ke_Hoach_Tai_Chinh_Q3-Q4_2026_Final.xlsx - Google Trang tính';
+        } else {
+            document.title = savedOriginalTitle || '18TUBE Cinema & Gallery - Trình Xem Video & Ảnh';
+            if (elements.theaterDriveIframe && elements.theaterDriveIframe.getAttribute('data-saved-src')) {
+                elements.theaterDriveIframe.src = elements.theaterDriveIframe.getAttribute('data-saved-src');
+                elements.theaterDriveIframe.removeAttribute('data-saved-src');
+            }
+        }
+    }
+
+    // ==========================================
+    // 5. HOVER VIDEO PREVIEW SYSTEM
+    // ==========================================
+    let hoverPreviewEnabled = true;
+    let hoverTimer = null;
+    let currentPreviewCard = null;
+    let currentPreviewVideo = null;
+    let currentPreviewPill = null;
+
+    function stopHoverPreview() {
+        if (hoverTimer) {
+            clearTimeout(hoverTimer);
+            hoverTimer = null;
+        }
+        if (currentPreviewCard) {
+            currentPreviewCard.classList.remove('is-previewing');
+            currentPreviewCard = null;
+        }
+        if (currentPreviewVideo) {
+            try {
+                currentPreviewVideo.pause();
+                currentPreviewVideo.removeAttribute('src');
+                currentPreviewVideo.load();
+            } catch (_) {}
+            currentPreviewVideo.remove();
+            currentPreviewVideo = null;
+        }
+        if (currentPreviewPill) {
+            currentPreviewPill.remove();
+            currentPreviewPill = null;
+        }
+    }
+
+    function startHoverPreview(card, itObj) {
+        if (!hoverPreviewEnabled || !itObj || itObj.type !== 'video' || !itObj.stream_url) return;
+        // Check if device supports hover with mouse
+        if (window.matchMedia && !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+
+        stopHoverPreview();
+
+        hoverTimer = setTimeout(() => {
+            const posterBox = card.querySelector('.media-poster-box');
+            if (!posterBox) return;
+
+            card.classList.add('is-previewing');
+            currentPreviewCard = card;
+
+            const vid = document.createElement('video');
+            vid.className = 'media-hover-preview';
+            vid.muted = true;
+            vid.setAttribute('muted', '');
+            vid.playsInline = true;
+            vid.setAttribute('playsinline', '');
+            vid.loop = true;
+            vid.preload = 'metadata';
+
+            const pill = document.createElement('span');
+            pill.className = 'media-preview-pill';
+            pill.innerHTML = '<span class="preview-pulse-dot"></span> PREVIEW';
+
+            // Check saved progress to preview from where user stopped, else start from beginning
+            const savedProg = getSavedProgress(itObj);
+            let offsetApplied = false;
+
+            const onCanPlay = () => {
+                if (!offsetApplied && savedProg && savedProg.time > 5) {
+                    offsetApplied = true;
+                    try { vid.currentTime = savedProg.time; } catch (_) {}
+                }
+                vid.play().then(() => {
+                    vid.classList.add('playing');
+                }).catch(() => {});
+            };
+
+            vid.addEventListener('canplay', onCanPlay, { once: true });
+            vid.src = itObj.stream_url;
+
+            posterBox.appendChild(vid);
+            posterBox.appendChild(pill);
+
+            currentPreviewVideo = vid;
+            currentPreviewPill = pill;
+        }, 320);
     }
 
     async function loadCreators() {
@@ -296,7 +663,8 @@
         let selectHtml = `<option value="all">🌍 Tất cả Quốc Gia (${totalCreators})</option>`;
         state.countries.forEach(c => {
             const info = getCountryInfo(c.name);
-            selectHtml += `<option value="${c.name}">${info.flag} ${c.name} (${c.count})</option>`;
+            const flagBadge = info.iso ? `${info.flag} [${info.iso.toUpperCase()}]` : (info.flag || '🌐');
+            selectHtml += `<option value="${c.name}">${flagBadge} ${c.name} (${c.count})</option>`;
         });
         elements.countrySelect.innerHTML = selectHtml;
         elements.countrySelect.value = state.selectedCountry;
@@ -343,9 +711,10 @@
         renderCreatorsList();
 
         // Tự động chọn creator đầu tiên của quốc gia mới chọn
+        const targetCountryName = getCountryInfo(state.selectedCountry).name;
         const visibleCreators = (state.selectedCountry === 'all') 
             ? state.creators 
-            : state.creators.filter(c => c.country === state.selectedCountry);
+            : state.creators.filter(c => getCountryInfo(c.country).name === targetCountryName);
 
         if (visibleCreators.length > 0) {
             const isCurrentVisible = visibleCreators.some(c => (c.slug || c.name) === state.selectedCreator);
@@ -357,9 +726,10 @@
     }
 
     function renderCreatorsList() {
+        const targetCountryName = getCountryInfo(state.selectedCountry).name;
         const visibleCreators = (state.selectedCountry === 'all')
             ? state.creators
-            : state.creators.filter(c => c.country === state.selectedCountry);
+            : state.creators.filter(c => getCountryInfo(c.country).name === targetCountryName);
 
         let totalVisibleFiles = 0;
         visibleCreators.forEach(c => {
@@ -374,10 +744,12 @@
         if (state.selectedCountry === 'all' && state.countries.length > 1) {
             let groupsHtml = allOption;
             state.countries.forEach(cntry => {
-                const cCreators = state.creators.filter(c => c.country === cntry.name);
+                const cntryNormalized = getCountryInfo(cntry.name).name;
+                const cCreators = state.creators.filter(c => getCountryInfo(c.country).name === cntryNormalized);
                 if (cCreators.length > 0) {
                     const info = getCountryInfo(cntry.name);
-                    groupsHtml += `<optgroup label="${info.flag} ${cntry.name} (${cCreators.length})">`;
+                    const flagBadge = info.iso ? `${info.flag} [${info.iso.toUpperCase()}]` : (info.flag || '🌐');
+                    groupsHtml += `<optgroup label="${flagBadge} ${cntry.name} (${cCreators.length})">`;
                     groupsHtml += cCreators.map(c => {
                         const slug = c.slug || c.name;
                         const dName = c.name || slug;
@@ -413,10 +785,10 @@
             const slug = c.slug || c.name;
             const dName = c.name || slug;
             const isActive = state.selectedCreator === slug ? 'active' : '';
-            const cFlagHtml = (c.country && c.country !== 'Việt Nam') ? getCountryFlagHtml(c.country) : '';
+            const cFlagHtml = getCountryFlagHtml(c.country || 'Việt Nam');
             return `
                 <span class="creator-chip ${isActive}" data-name="${slug}">
-                    ${cFlagHtml || '<span>👤</span>'}
+                    ${cFlagHtml}
                     <span>${dName}</span>
                 </span>
             `;
@@ -545,6 +917,7 @@
         elements.badgeCntAll.textContent = state.mediaItems.length;
         elements.badgeCntVideo.textContent = unifiedVideos.length;
         elements.badgeCntPhoto.textContent = unifiedPhotos.length;
+        updateFavoritesBadge();
 
         filterAndRenderGrid();
     }
@@ -560,11 +933,15 @@
         const thumbSrc = it.thumbnail_url || (it.file_id ? `https://lh3.googleusercontent.com/d/${it.file_id}=w500` : it.stream_url);
         const fallbackSrc = it.file_id ? `/api/media/thumbnail?id=${it.file_id}&proxy=1` : '/static/placeholder.svg';
 
+        const isFav = isItemFavorite(it);
+        const savedProg = isVid ? getSavedProgress(it) : null;
+
         // Tối ưu tên file: Ẩn tag creator nếu đang chọn 1 creator cụ thể để tránh lặp lại thô kệch
         const isSpecificCreator = state.selectedCreator && state.selectedCreator !== '__all__';
         let creatorPrefix = '';
         if (!isSpecificCreator && it.creator) {
-            const cFlagHtml = (it.country && it.country !== 'Việt Nam') ? `${it.country} • ` : '';
+            const cInfo = getCountryInfo(it.country);
+            const cFlagHtml = (cInfo.iso && cInfo.iso !== 'vn') ? `${cInfo.flag} ` : '';
             creatorPrefix = `<span class="creator-tag-pill">[${cFlagHtml}${it.creator}]</span>`;
         }
 
@@ -577,6 +954,13 @@
                     <span class="media-type-badge ${badgeClass}">${badgeText}</span>
                     <span class="media-size-badge">${it.size_str || ''}</span>
 
+                    <!-- HEART FAVORITE BUTTON -->
+                    <button class="media-card-fav-btn ${isFav ? 'is-fav' : ''}" data-fav-id="${it.id}" title="${isFav ? 'Bỏ yêu thích' : 'Thêm vào yêu thích'}" aria-label="Yêu thích">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                        </svg>
+                    </button>
+
                     <img src="${thumbSrc}" 
                          alt="${it.name}" 
                          loading="lazy" 
@@ -586,6 +970,11 @@
                         <div class="media-play-glow" title="Nhấn để phát video chuẩn Rạp Chiếu">
                             <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
                         </div>
+                        ${(savedProg && savedProg.pct > 2 && savedProg.pct < 95) ? `
+                            <div class="media-progress-bar-wrap" title="Đã xem: ${savedProg.pct}% (${formatDuration(savedProg.time)})">
+                                <div class="media-progress-bar-fill" style="width: ${savedProg.pct}%"></div>
+                            </div>
+                        ` : ''}
                     ` : ''}
                 </div>
                 <div class="media-meta-box">
@@ -609,10 +998,17 @@
         if (state.currentPage < 1) state.currentPage = 1;
 
         if (totalItems === 0) {
+            const isFavTab = state.mediaTypeFilter === 'favorite';
+            const emptyMsg = isFavTab 
+                ? 'Bạn chưa có ảnh hoặc video yêu thích nào. Hãy nhấn biểu tượng ❤️ trên các thẻ để lưu vào danh sách yêu thích!' 
+                : 'Không tìm thấy ảnh hoặc video nào phù hợp';
+            const emptyIcon = isFavTab 
+                ? '<div style="font-size: 3rem; margin-bottom: 0.5rem;">❤️</div>' 
+                : '<svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>';
             elements.cinemaGrid.innerHTML = `
                 <div class="cinema-empty">
-                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                    <span>Không tìm thấy ảnh hoặc video nào phù hợp</span>
+                    ${emptyIcon}
+                    <span>${emptyMsg}</span>
                 </div>
             `;
             elements.mediaStatusText.textContent = '0 tệp tin';
@@ -631,9 +1027,36 @@
         temp.innerHTML = pageItems.map(it => renderCardHtml(it)).join('');
         const fragment = document.createDocumentFragment();
         Array.from(temp.children).forEach(card => {
+            const id = card.getAttribute('data-id');
+            const type = card.getAttribute('data-type');
+            const itObj = pageItems.find(it => it.id === id);
+
+            // Gắn sự kiện Thả tim trên thẻ
+            const favBtn = card.querySelector('.media-card-fav-btn');
+            if (favBtn && itObj) {
+                favBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const nowFav = toggleItemFavorite(itObj);
+                    favBtn.classList.toggle('is-fav', nowFav);
+                    favBtn.title = nowFav ? 'Bỏ yêu thích' : 'Thêm vào yêu thích';
+                    if (state.mediaTypeFilter === 'favorite') {
+                        filterAndRenderGrid();
+                    }
+                });
+            }
+
+            // Gắn sự kiện Hover Preview xem trước video
+            if (type === 'video' && itObj) {
+                card.addEventListener('mouseenter', () => {
+                    startHoverPreview(card, itObj);
+                });
+                card.addEventListener('mouseleave', () => {
+                    stopHoverPreview();
+                });
+            }
+
             card.addEventListener('click', () => {
-                const id = card.getAttribute('data-id');
-                const type = card.getAttribute('data-type');
+                stopHoverPreview();
                 if (type === 'video') openTheaterVideoById(id);
                 else openPhotoLightboxById(id);
             });
@@ -659,8 +1082,8 @@
         let html = '';
 
         // Nút Trang Đầu & Nút Trước
-        html += `<button class="page-btn" data-page="1" ${cur === 1 ? 'disabled' : ''} title="Trang đầu">⏮ Đầu</button>`;
-        html += `<button class="page-btn" data-page="${cur - 1}" ${cur === 1 ? 'disabled' : ''} title="Trang trước">◀ Trước</button>`;
+        html += `<button class="page-btn page-btn-nav page-btn-first" data-page="1" ${cur === 1 ? 'disabled' : ''} title="Trang đầu"><span class="nav-icon">⏮</span><span class="nav-text"> Đầu</span></button>`;
+        html += `<button class="page-btn page-btn-nav page-btn-prev" data-page="${cur - 1}" ${cur === 1 ? 'disabled' : ''} title="Trang trước"><span class="nav-icon">◀</span><span class="nav-text"> Trước</span></button>`;
 
         // Thuật toán hiển thị các nút số trang thông minh
         const pages = [];
@@ -696,8 +1119,8 @@
         });
 
         // Nút Sau & Nút Cuối
-        html += `<button class="page-btn" data-page="${cur + 1}" ${cur === totalPages ? 'disabled' : ''} title="Trang kế tiếp">Sau ▶</button>`;
-        html += `<button class="page-btn" data-page="${totalPages}" ${cur === totalPages ? 'disabled' : ''} title="Trang cuối">Cuối ⏭</button>`;
+        html += `<button class="page-btn page-btn-nav page-btn-next" data-page="${cur + 1}" ${cur === totalPages ? 'disabled' : ''} title="Trang kế tiếp"><span class="nav-text">Sau </span><span class="nav-icon">▶</span></button>`;
+        html += `<button class="page-btn page-btn-nav page-btn-last" data-page="${totalPages}" ${cur === totalPages ? 'disabled' : ''} title="Trang cuối"><span class="nav-text">Cuối </span><span class="nav-icon">⏭</span></button>`;
 
         // Hộp Nhảy Trang Nhanh & Tóm tắt
         html += `
@@ -755,8 +1178,10 @@
     function filterAndRenderGrid() {
         let items = [...state.mediaItems];
 
-        // 1. Lọc theo Loại media (All, Video, Photo)
-        if (state.mediaTypeFilter === 'video') {
+        // 1. Lọc theo Loại media (All, Video, Photo, Favorite)
+        if (state.mediaTypeFilter === 'favorite') {
+            items = items.filter(it => isItemFavorite(it));
+        } else if (state.mediaTypeFilter === 'video') {
             items = items.filter(it => it.type === 'video');
         } else if (state.mediaTypeFilter === 'photo') {
             items = items.filter(it => it.type === 'photo');
@@ -804,7 +1229,7 @@
                 vjsPlayer = videojs('theater-video', {
                     controls: true,
                     autoplay: true,
-                    preload: 'auto',
+                    preload: 'metadata',
                     fluid: false,
                     fill: true,
                     playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
@@ -814,7 +1239,23 @@
                     }
                 });
 
+                // Lưu tiến độ xem dở tự động (lưu mỗi ~2.5s)
+                let lastSaveTime = 0;
+                vjsPlayer.on('timeupdate', () => {
+                    const now = Date.now();
+                    if (now - lastSaveTime < 2500) return;
+                    lastSaveTime = now;
+                    const curVid = state.videoList[state.currentVideoIndex];
+                    if (curVid && vjsPlayer.duration()) {
+                        saveProgress(curVid, vjsPlayer.currentTime(), vjsPlayer.duration());
+                    }
+                });
+
                 vjsPlayer.on('ended', () => {
+                    const curVid = state.videoList[state.currentVideoIndex];
+                    if (curVid) {
+                        clearProgress(curVid);
+                    }
                     if (elements.chkAutoNext && elements.chkAutoNext.checked) {
                         playNextVideo();
                     }
@@ -836,6 +1277,7 @@
     }
 
     function openTheaterVideoById(id) {
+        stopHoverPreview();
         const vIndex = state.videoList.findIndex(v => v.id === id);
         if (vIndex !== -1) {
             playTheaterVideo(vIndex);
@@ -849,6 +1291,25 @@
 
         elements.theaterVideoTitle.textContent = `${index + 1}/${state.videoList.length} - ${vid.name}`;
         elements.theaterDownloadBtn.href = vid.stream_url + '&dl=1';
+
+        // Đồng bộ trạng thái Yêu thích trên thanh công cụ Theater
+        syncTheaterFavButton(vid);
+
+        // Kiểm tra tiến độ đã xem dở trước đó
+        const savedProg = getSavedProgress(vid);
+        let resumeApplied = false;
+        const applyResume = () => {
+            if (resumeApplied || !savedProg || savedProg.time <= 5) return;
+            resumeApplied = true;
+            try {
+                if (vjsPlayer && state.playerEngine !== 'drive') {
+                    vjsPlayer.currentTime(savedProg.time);
+                } else if (elements.theaterVideo) {
+                    elements.theaterVideo.currentTime = savedProg.time;
+                }
+                showToast(`🕒 Tiếp tục phát từ ${formatDuration(savedProg.time)} (${savedProg.pct}%)`, 'info');
+            } catch (_) {}
+        };
 
         // External Drive link button
         if (vid.drive_url) {
@@ -893,12 +1354,22 @@
                         player.muted(true);
                         player.play().catch(() => { });
                     });
+                    if (savedProg && savedProg.time > 5) {
+                        player.one('loadedmetadata', applyResume);
+                    }
                 });
                 player.loop(state.isLooping);
             } else {
                 elements.theaterVideo.style.display = 'block';
                 elements.theaterVideo.src = vid.stream_url;
                 elements.theaterVideo.load();
+                if (savedProg && savedProg.time > 5) {
+                    const onLoaded = () => {
+                        applyResume();
+                        elements.theaterVideo.removeEventListener('loadedmetadata', onLoaded);
+                    };
+                    elements.theaterVideo.addEventListener('loadedmetadata', onLoaded);
+                }
                 elements.theaterVideo.play().catch(() => {
                     elements.theaterVideo.muted = true;
                     elements.theaterVideo.play().catch(() => { });
@@ -943,6 +1414,7 @@
     }
 
     function closeTheater() {
+        stopHoverPreview();
         elements.theaterModal.classList.remove('active');
         if (vjsPlayer) {
             vjsPlayer.pause();
@@ -993,6 +1465,9 @@
         elements.lbCounter.textContent = `${index + 1} / ${state.photoList.length}`;
         elements.lbTitle.textContent = photo.name;
         elements.lbBtnDownload.href = photo.stream_url + (photo.is_local ? '&dl=1' : '');
+
+        // Đồng bộ trạng thái Yêu thích trong Lightbox
+        syncLightboxFavButton(photo);
 
         renderFilmstrip();
         elements.photoLightbox.classList.add('active');
@@ -1056,6 +1531,7 @@
     }
 
     function closeLightbox() {
+        stopHoverPreview();
         if (state.slideshowTimer) {
             clearInterval(state.slideshowTimer);
             state.slideshowTimer = null;
@@ -1249,6 +1725,64 @@
             });
         });
 
+        // Theater & Lightbox Favorite Buttons
+        if (elements.btnTheaterFav) {
+            elements.btnTheaterFav.addEventListener('click', () => {
+                const curVid = state.videoList[state.currentVideoIndex];
+                if (curVid) {
+                    toggleItemFavorite(curVid);
+                    if (state.mediaTypeFilter === 'favorite') {
+                        filterAndRenderGrid();
+                    }
+                }
+            });
+        }
+
+        if (elements.lbBtnFav) {
+            elements.lbBtnFav.addEventListener('click', () => {
+                const curPhoto = state.photoList[state.currentPhotoIndex];
+                if (curPhoto) {
+                    toggleItemFavorite(curPhoto);
+                    if (state.mediaTypeFilter === 'favorite') {
+                        filterAndRenderGrid();
+                    }
+                }
+            });
+        }
+
+        // Random Video button
+        if (elements.btnRandomVideo) {
+            elements.btnRandomVideo.addEventListener('click', (e) => {
+                e.preventDefault();
+                playRandomVideo();
+            });
+        }
+
+        // Boss Mode buttons
+        if (elements.btnBossMode) {
+            elements.btnBossMode.addEventListener('click', (e) => {
+                e.preventDefault();
+                toggleBossMode();
+            });
+        }
+        if (elements.btnExitBossMode) {
+            elements.btnExitBossMode.addEventListener('click', (e) => {
+                e.preventDefault();
+                toggleBossMode(false);
+            });
+        }
+
+        // Hover Preview Toggle Button
+        if (elements.btnToggleHoverPreview) {
+            elements.btnToggleHoverPreview.addEventListener('click', () => {
+                hoverPreviewEnabled = !hoverPreviewEnabled;
+                elements.btnToggleHoverPreview.classList.toggle('active', hoverPreviewEnabled);
+                elements.btnToggleHoverPreview.innerHTML = hoverPreviewEnabled ? '<span>👁️ Preview: Bật</span>' : '<span>👁️ Preview: Tắt</span>';
+                if (!hoverPreviewEnabled) stopHoverPreview();
+                showToast(hoverPreviewEnabled ? 'Đã bật xem trước video khi rê chuột' : 'Đã tắt xem trước video');
+            });
+        }
+
         // Lightbox events
         elements.lbBtnClose.addEventListener('click', closeLightbox);
         elements.lightboxOverlay.addEventListener('click', closeLightbox);
@@ -1297,6 +1831,29 @@
 
         // KEYBOARD SHORTCUTS
         document.addEventListener('keydown', (e) => {
+            // Boss Mode Active: Thoát ngay khi nhấn B hoặc ESC
+            if (isBossModeActive) {
+                if (e.key.toLowerCase() === 'b' || e.key === 'Escape') {
+                    e.preventDefault();
+                    toggleBossMode(false);
+                }
+                return;
+            }
+
+            // Boss Mode shortcut: Nhấn 'b' / 'B' để bật ngụy trang khẩn cấp
+            if (e.key.toLowerCase() === 'b' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                toggleBossMode(true);
+                return;
+            }
+
+            // Random video shortcut: Nhấn 'r' / 'R' để phát ngẫu nhiên
+            if (e.key.toLowerCase() === 'r' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                playRandomVideo();
+                return;
+            }
+
             // Search shortcut: Nhấn '/' khi không đang nhập ô input
             if (e.key === '/' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
                 e.preventDefault();
@@ -1351,6 +1908,15 @@
                 }
             }
 
+            // Quick scroll to top with Home key
+            if (e.key === 'Home' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                if (!elements.theaterModal.classList.contains('active') && !elements.photoLightbox.classList.contains('active')) {
+                    e.preventDefault();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    return;
+                }
+            }
+
             // If in Photo Lightbox
             if (elements.photoLightbox.classList.contains('active')) {
                 if (e.key === 'Escape') closeLightbox();
@@ -1358,10 +1924,37 @@
                 if (e.key === 'ArrowLeft') prevPhoto();
             }
         });
+
+        // Floating Back to Top button
+        const btnBackToTop = document.getElementById('btn-back-to-top');
+        if (btnBackToTop) {
+            let scrollTicking = false;
+            window.addEventListener('scroll', () => {
+                stopHoverPreview();
+                if (!scrollTicking) {
+                    window.requestAnimationFrame(() => {
+                        if (window.scrollY > 280) {
+                            btnBackToTop.classList.add('visible');
+                        } else {
+                            btnBackToTop.classList.remove('visible');
+                        }
+                        scrollTicking = false;
+                    });
+                    scrollTicking = true;
+                }
+            }, { passive: true });
+
+            btnBackToTop.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        }
     }
 
     // Init App
     document.addEventListener('DOMContentLoaded', () => {
+        loadFavorites();
+        loadProgress();
         initEvents();
         loadCreators();
     });

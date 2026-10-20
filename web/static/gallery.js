@@ -793,6 +793,13 @@
                                     <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
                                     <span>Phát tất cả Video</span>
                                 </button>
+                                <a href="/feed?creator=${encodeURIComponent(curSlug)}" class="btn-profile-tiktok btn-profile-feed" title="Lướt toàn bộ video của @${cName} theo phong cách TikTok Shorts">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                                        <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                                    </svg>
+                                    <span>📱 Lướt TikTok</span>
+                                </a>
                             ` : ''}
 
                             <button class="btn-profile-tiktok btn-profile-follow ${isFollowing ? 'is-following' : ''}" id="btn-profile-follow" title="${isFollowing ? 'Bỏ theo dõi creator này' : 'Theo dõi & lưu creator vào mục yêu thích'}">
@@ -2223,6 +2230,18 @@
             if (e.key.toLowerCase() === 'r' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
                 e.preventDefault();
                 playRandomVideo();
+                return;
+            }
+
+            // TikTok Shorts shortcut: Nhấn 't' / 'T' để mở trang lướt video TikTok Shorts
+            if (e.key.toLowerCase() === 't' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                const curCreator = state.selectedCreator;
+                if (curCreator && curCreator !== '__all__') {
+                    window.location.href = `/feed?creator=${encodeURIComponent(curCreator)}`;
+                } else {
+                    window.location.href = '/feed';
+                }
                 return;
             }
 

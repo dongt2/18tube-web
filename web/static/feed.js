@@ -1,0 +1,805 @@
+/**
+ * 18TUBE TIKTOK SHORTS - FULLSCREEN VERTICAL VIDEO FEED
+ * High-performance, distraction-free video scrolling logic
+ */
+
+(function () {
+    'use strict';
+
+    // -------------------------------------------------------------
+    // STATE MANAGEMENT
+    // -------------------------------------------------------------
+    const state = {
+        videos: [],
+        currentIndex: 0,
+        isMuted: true, // Trình duyệt chặn unmuted autoplay ban đầu
+        autoNext: true,
+        activeTab: 'fyp', // 'fyp' | 'following'
+        targetCreator: '',
+        page: 1,
+        isLoadingMore: false,
+        hasMore: true,
+        seenIds: new Set(),
+        likedIds: new Set(),
+        favoritedIds: new Set(),
+        followedCreators: new Set(),
+        lastTapTime: 0,
+        lastTapX: 0,
+        lastTapY: 0
+    };
+
+    // Load LocalStorage states
+    try {
+        const storedLikes = JSON.parse(localStorage.getItem('18tube_feed_likes') || '[]');
+        state.likedIds = new Set(storedLikes);
+        const storedFavs = JSON.parse(localStorage.getItem('18tube_feed_favs') || '[]');
+        state.favoritedIds = new Set(storedFavs);
+        const storedFollows = JSON.parse(localStorage.getItem('18tube_feed_follows') || '[]');
+        state.followedCreators = new Set(storedFollows);
+    } catch (e) {
+        console.warn('Lỗi đọc localStorage:', e);
+    }
+
+    // -------------------------------------------------------------
+    // DOM REFERENCES
+    // -------------------------------------------------------------
+    const container = document.getElementById('tiktok-feed-container');
+    const unmutePrompt = document.getElementById('feed-unmute-prompt');
+    const btnToggleSound = document.getElementById('btn-toggle-sound');
+    const iconSoundOn = document.getElementById('icon-sound-on');
+    const iconSoundOff = document.getElementById('icon-sound-off');
+    const btnToggleAutoNext = document.getElementById('btn-toggle-autonext');
+    const btnToggleFullscreen = document.getElementById('btn-toggle-fullscreen');
+    const tabFyp = document.getElementById('tab-fyp');
+    const tabFollowing = document.getElementById('tab-following');
+    const btnDeskPrev = document.getElementById('btn-desk-prev');
+    const btnDeskNext = document.getElementById('btn-desk-next');
+    const toastContainer = document.getElementById('feed-toast-container');
+
+    // -------------------------------------------------------------
+    // HELPERS & UTILITIES
+    // -------------------------------------------------------------
+    function showToast(msg, duration = 2500) {
+        if (!toastContainer) return;
+        const toast = document.createElement('div');
+        toast.className = 'feed-toast-msg';
+        toast.textContent = msg;
+        toastContainer.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+
+    function formatNumber(num) {
+        if (!num || num < 0) return '0';
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+        return String(num);
+    }
+
+    // Tạo số like giả lập dựa trên video id để TikTok feed trông sinh động
+    function getEstimatedLikes(videoId) {
+        let hash = 0;
+        const str = String(videoId || '18tube');
+        for (let i = 0; i < str.length; i++) {
+            hash = (hash << 5) - hash + str.charCodeAt(i);
+            hash |= 0;
+        }
+        return Math.abs(hash % 9800) + 120;
+    }
+
+    // -------------------------------------------------------------
+    // SOUND & AUTONEXT CONTROLS
+    // -------------------------------------------------------------
+    function setMuted(muted) {
+        state.isMuted = muted;
+        if (iconSoundOn && iconSoundOff) {
+            iconSoundOn.style.display = muted ? 'none' : 'block';
+            iconSoundOff.style.display = muted ? 'block' : 'none';
+        }
+        if (btnToggleSound) {
+            btnToggleSound.classList.toggle('active', !muted);
+        }
+        if (unmutePrompt) {
+            if (!muted) unmutePrompt.classList.add('hidden');
+        }
+
+        // Áp dụng âm thanh ngay cho video hiện tại đang phát
+        const curSlide = container.children[state.currentIndex];
+        if (curSlide) {
+            const vid = curSlide.querySelector('.tiktok-video');
+            if (vid) {
+                vid.muted = muted;
+            }
+        }
+        showToast(muted ? '🔇 Đã tắt âm thanh' : '🔊 Đã bật âm thanh');
+    }
+
+    function toggleSound() {
+        setMuted(!state.isMuted);
+    }
+
+    function setAutoNext(enabled) {
+        state.autoNext = enabled;
+        if (btnToggleAutoNext) {
+            btnToggleAutoNext.classList.toggle('active', enabled);
+        }
+        showToast(enabled ? '⚡ Đã bật tự lướt video tiếp theo' : '⏸ Đã tắt tự lướt video');
+    }
+
+    // -------------------------------------------------------------
+    // FULLSCREEN HANDLER
+    // -------------------------------------------------------------
+    function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen().catch(() => {});
+            }
+        }
+    }
+
+    // -------------------------------------------------------------
+    // RENDER SLIDE DOM
+    // -------------------------------------------------------------
+    function createSlideElement(video, index) {
+        const slide = document.createElement('div');
+        slide.className = 'tiktok-slide';
+        slide.dataset.index = index;
+        const videoId = video.id || video.path || `vid_${index}`;
+        slide.dataset.id = videoId;
+
+        const isLiked = state.likedIds.has(videoId);
+        const isFav = state.favoritedIds.has(videoId);
+        const creatorName = video.creator || 'Creator';
+        const isFollowing = state.followedCreators.has(creatorName);
+        const likesCount = getEstimatedLikes(videoId) + (isLiked ? 1 : 0);
+        const streamUrl = video.stream_url || (video.id ? `/api/media/drive/stream?id=${video.id}&name=${encodeURIComponent(video.name || 'video.mp4')}` : '');
+        const posterUrl = video.thumbnail_url || (video.id ? `https://lh3.googleusercontent.com/d/${video.id}=w800` : '/static/placeholder.svg');
+        const driveUrl = video.drive_view_url || (video.id ? `https://drive.google.com/file/d/${video.id}/view` : '#');
+        const country = video.country || 'Việt Nam';
+        const sizeStr = video.size_str || '';
+
+        // Tên đại diện và avatar cho creator
+        const avatarLetter = (creatorName[0] || 'C').toUpperCase();
+
+        slide.innerHTML = `
+            <!-- AMBIENT BLUR BACKDROP -->
+            <div class="slide-ambient-blur" style="background-image: url('${posterUrl}')"></div>
+
+            <!-- MAIN VIDEO STAGE -->
+            <div class="slide-video-wrap">
+                <video class="tiktok-video" 
+                       playsinline 
+                       webkit-playsinline 
+                       x5-playsinline
+                       loop 
+                       preload="metadata" 
+                       poster="${posterUrl}">
+                    <source src="${streamUrl}" type="video/mp4">
+                </video>
+
+                <!-- CENTER PLAY / PAUSE PULSE INDICATOR -->
+                <div class="slide-center-play-icon">
+                    <svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor">
+                        <polygon points="6 3 20 12 6 21 6 3"></polygon>
+                    </svg>
+                </div>
+
+                <!-- RIGHT ACTION SIDEBAR -->
+                <div class="slide-actions-bar">
+                    <!-- AVATAR + FOLLOW -->
+                    <div class="action-avatar-wrap">
+                        <a href="/gallery?creator=${encodeURIComponent(creatorName)}" class="action-avatar-link" title="Xem toàn bộ video của @${creatorName}">
+                            <div class="action-avatar-fallback">${avatarLetter}</div>
+                        </a>
+                        <div class="action-follow-badge ${isFollowing ? 'is-following' : ''}" title="${isFollowing ? 'Đang theo dõi' : 'Nhấn để theo dõi'}">
+                            ${isFollowing ? '✓' : '+'}
+                        </div>
+                    </div>
+
+                    <!-- LIKE BUTTON -->
+                    <button class="action-btn-item action-btn-like ${isLiked ? 'is-liked' : ''}" title="Thích video (Phím L)">
+                        <div class="action-icon-circle">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                            </svg>
+                        </div>
+                        <span class="action-count-text">${formatNumber(likesCount)}</span>
+                    </button>
+
+                    <!-- FAVORITE / BOOKMARK BUTTON -->
+                    <button class="action-btn-item action-btn-fav ${isFav ? 'is-fav' : ''}" title="Lưu vào mục Yêu thích">
+                        <div class="action-icon-circle">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                            </svg>
+                        </div>
+                        <span class="action-count-text">Lưu</span>
+                    </button>
+
+                    <!-- SHARE BUTTON -->
+                    <button class="action-btn-item action-btn-share" title="Sao chép liên kết video">
+                        <div class="action-icon-circle">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="18" cy="5" r="3"></circle>
+                                <circle cx="6" cy="12" r="3"></circle>
+                                <circle cx="18" cy="19" r="3"></circle>
+                                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                            </svg>
+                        </div>
+                        <span class="action-count-text">Chia sẻ</span>
+                    </button>
+
+                    <!-- GOOGLE DRIVE DIRECT BUTTON -->
+                    <a href="${driveUrl}" target="_blank" rel="noopener noreferrer" class="action-btn-item action-btn-drive" title="Mở file gốc trên Google Drive">
+                        <div class="action-icon-circle">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </div>
+                        <span class="action-count-text">Drive</span>
+                    </a>
+
+                    <!-- SPINNING MUSIC DISC -->
+                    <div class="action-music-disc">
+                        <div class="disc-center-art" style="background-image: url('${posterUrl}')"></div>
+                    </div>
+                </div>
+
+                <!-- BOTTOM-LEFT INFO OVERLAY -->
+                <div class="slide-info-overlay">
+                    <div class="slide-creator-row">
+                        <a href="/gallery?creator=${encodeURIComponent(creatorName)}" class="slide-creator-handle">
+                            @${creatorName}
+                            <span class="slide-verified-tick" title="Đã xác thực nguồn">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                </svg>
+                            </span>
+                        </a>
+                        <span class="slide-country-pill">${country}</span>
+                    </div>
+
+                    <div class="slide-caption-row">
+                        <span class="slide-filename">${video.name || 'Video 4K'}</span>
+                        ${sizeStr ? `<span class="slide-size-pill">${sizeStr}</span>` : ''}
+                    </div>
+
+                    <!-- SOUND TICKER -->
+                    <div class="slide-audio-ticker">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18V5l12-2v13"></path>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <circle cx="18" cy="16" r="3"></circle>
+                        </svg>
+                        <span class="ticker-marquee-text">Âm thanh gốc - @${creatorName} • 18TUBE 4K</span>
+                    </div>
+                </div>
+
+                <!-- BOTTOM PROGRESS BAR -->
+                <div class="slide-progress-bar-wrap" title="Tua video">
+                    <div class="slide-progress-fill"></div>
+                </div>
+            </div>
+        `;
+
+        attachSlideEvents(slide, video, videoId, creatorName, likesCount);
+        return slide;
+    }
+
+    // -------------------------------------------------------------
+    // SLIDE EVENTS & INTERACTIONS
+    // -------------------------------------------------------------
+    function attachSlideEvents(slide, video, videoId, creatorName, baseLikes) {
+        const videoEl = slide.querySelector('.tiktok-video');
+        const playIcon = slide.querySelector('.slide-center-play-icon');
+        const videoWrap = slide.querySelector('.slide-video-wrap');
+        const btnLike = slide.querySelector('.action-btn-like');
+        const likeCountEl = btnLike ? btnLike.querySelector('.action-count-text') : null;
+        const btnFav = slide.querySelector('.action-btn-fav');
+        const btnShare = slide.querySelector('.action-btn-share');
+        const followBadge = slide.querySelector('.action-follow-badge');
+        const disc = slide.querySelector('.action-music-disc');
+        const progressWrap = slide.querySelector('.slide-progress-bar-wrap');
+        const progressFill = slide.querySelector('.slide-progress-fill');
+
+        // 1. Double Tap Flying Heart Effect
+        function spawnFloatingHeart(clientX, clientY) {
+            const rect = videoWrap.getBoundingClientRect();
+            const relX = clientX - rect.left;
+            const relY = clientY - rect.top;
+
+            const heart = document.createElement('div');
+            heart.className = 'heart-tap-particle';
+            heart.style.left = `${relX}px`;
+            heart.style.top = `${relY}px`;
+            heart.innerHTML = `
+                <svg viewBox="0 0 24 24">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                </svg>
+            `;
+            videoWrap.appendChild(heart);
+            setTimeout(() => heart.remove(), 900);
+
+            // Tự động thích video nếu chưa thích
+            if (!state.likedIds.has(videoId)) {
+                toggleLikeVideo(videoId, btnLike, likeCountEl, baseLikes);
+            }
+        }
+
+        // Single Tap / Double Tap Detection
+        let clickTimeout = null;
+        videoEl.addEventListener('click', (e) => {
+            const now = Date.now();
+            const timeDiff = now - state.lastTapTime;
+
+            if (timeDiff < 320) {
+                // Double tap!
+                clearTimeout(clickTimeout);
+                clickTimeout = null;
+                spawnFloatingHeart(e.clientX, e.clientY);
+                state.lastTapTime = 0;
+            } else {
+                // Single tap chờ xem có tap lần 2 không
+                state.lastTapTime = now;
+                clickTimeout = setTimeout(() => {
+                    // Toggle Play / Pause
+                    if (videoEl.paused) {
+                        videoEl.play().then(() => {
+                            playIcon.classList.remove('visible');
+                            disc.classList.add('playing');
+                        }).catch(() => {});
+                    } else {
+                        videoEl.pause();
+                        playIcon.classList.add('visible');
+                        disc.classList.remove('playing');
+                    }
+                    clickTimeout = null;
+                }, 300);
+            }
+        });
+
+        // 2. Like Button Click
+        if (btnLike) {
+            btnLike.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleLikeVideo(videoId, btnLike, likeCountEl, baseLikes);
+            });
+        }
+
+        // 3. Favorite Button Click
+        if (btnFav) {
+            btnFav.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isFav = state.favoritedIds.has(videoId);
+                if (isFav) {
+                    state.favoritedIds.delete(videoId);
+                    btnFav.classList.remove('is-fav');
+                    showToast('Đã bỏ lưu video');
+                } else {
+                    state.favoritedIds.add(videoId);
+                    btnFav.classList.add('is-fav');
+                    showToast('⭐ Đã lưu vào mục Yêu thích');
+                }
+                localStorage.setItem('18tube_feed_favs', JSON.stringify(Array.from(state.favoritedIds)));
+            });
+        }
+
+        // 4. Follow Badge Click
+        if (followBadge) {
+            followBadge.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isFollowing = state.followedCreators.has(creatorName);
+                if (isFollowing) {
+                    state.followedCreators.delete(creatorName);
+                    followBadge.classList.remove('is-following');
+                    followBadge.textContent = '+';
+                    followBadge.title = 'Nhấn để theo dõi';
+                    showToast(`Đã bỏ theo dõi @${creatorName}`);
+                } else {
+                    state.followedCreators.add(creatorName);
+                    followBadge.classList.add('is-following');
+                    followBadge.textContent = '✓';
+                    followBadge.title = 'Đang theo dõi';
+                    showToast(`✨ Đang theo dõi @${creatorName}`);
+                }
+                localStorage.setItem('18tube_feed_follows', JSON.stringify(Array.from(state.followedCreators)));
+            });
+        }
+
+        // 5. Share Button Click
+        if (btnShare) {
+            btnShare.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const shareUrl = `${window.location.origin}/feed?creator=${encodeURIComponent(creatorName)}&v=${videoId}`;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(shareUrl).then(() => {
+                        showToast('🔗 Đã sao chép liên kết video vào clipboard!');
+                    }).catch(() => {
+                        showToast('Liên kết: ' + shareUrl);
+                    });
+                } else {
+                    showToast('Liên kết: ' + shareUrl);
+                }
+            });
+        }
+
+        // 6. Progress Bar Scrubber
+        videoEl.addEventListener('timeupdate', () => {
+            if (videoEl.duration && progressFill) {
+                const pct = (videoEl.currentTime / videoEl.duration) * 100;
+                progressFill.style.width = `${pct}%`;
+            }
+        });
+
+        if (progressWrap) {
+            progressWrap.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const rect = progressWrap.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const pct = Math.max(0, Math.min(1, clickX / rect.width));
+                if (videoEl.duration) {
+                    videoEl.currentTime = pct * videoEl.duration;
+                }
+            });
+        }
+
+        // 7. Video Ended Handler
+        videoEl.addEventListener('ended', () => {
+            if (state.autoNext) {
+                scrollToNextVideo();
+            }
+        });
+    }
+
+    function toggleLikeVideo(videoId, btnLike, likeCountEl, baseLikes) {
+        const isLiked = state.likedIds.has(videoId);
+        if (isLiked) {
+            state.likedIds.delete(videoId);
+            btnLike.classList.remove('is-liked');
+            if (likeCountEl) likeCountEl.textContent = formatNumber(baseLikes);
+            showToast('Đã bỏ thích');
+        } else {
+            state.likedIds.add(videoId);
+            btnLike.classList.add('is-liked');
+            if (likeCountEl) likeCountEl.textContent = formatNumber(baseLikes + 1);
+            showToast('❤️ Đã thích video');
+        }
+        localStorage.setItem('18tube_feed_likes', JSON.stringify(Array.from(state.likedIds)));
+    }
+
+    // -------------------------------------------------------------
+    // INTERSECTION OBSERVER (SMART AUTOPLAY & SCROLL DETECTION)
+    // -------------------------------------------------------------
+    let observer = null;
+
+    function setupObserver() {
+        if (observer) observer.disconnect();
+
+        observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                const slide = entry.target;
+                const vid = slide.querySelector('.tiktok-video');
+                const disc = slide.querySelector('.action-music-disc');
+                const playIcon = slide.querySelector('.slide-center-play-icon');
+                const slideIndex = parseInt(slide.dataset.index, 10);
+
+                if (entry.isIntersecting) {
+                    state.currentIndex = slideIndex;
+                    if (vid) {
+                        vid.muted = state.isMuted;
+                        const playPromise = vid.play();
+                        if (playPromise !== undefined) {
+                            playPromise.then(() => {
+                                if (disc) disc.classList.add('playing');
+                                if (playIcon) playIcon.classList.remove('visible');
+                            }).catch(() => {
+                                // Nếu bị chặn autoplay unmuted thì ép muted và thử lại
+                                vid.muted = true;
+                                vid.play().then(() => {
+                                    if (disc) disc.classList.add('playing');
+                                }).catch(() => {});
+                            });
+                        }
+                    }
+
+                    // Tải ngầm trước (preload) video tiếp theo để lướt không bị khựng
+                    const nextSlide = container.children[slideIndex + 1];
+                    if (nextSlide) {
+                        const nextVid = nextSlide.querySelector('.tiktok-video');
+                        if (nextVid && nextVid.preload !== 'auto') {
+                            nextVid.preload = 'auto';
+                        }
+                    }
+
+                    // Kiểm tra cần tải thêm video vô tận không (khi còn cách cuối 3 video)
+                    if (slideIndex >= state.videos.length - 3 && !state.isLoadingMore && state.hasMore) {
+                        fetchMoreVideos();
+                    }
+                } else {
+                    // Dừng video khi cuộn ra ngoài màn hình để tiết kiệm RAM & CPU
+                    if (vid) {
+                        vid.pause();
+                        if (disc) disc.classList.remove('playing');
+                    }
+                }
+            });
+        }, {
+            root: container,
+            threshold: 0.65 // Chiếm trên 65% khung hình mới coi là video đang xem
+        });
+
+        // Đăng ký toàn bộ slide hiện có
+        Array.from(container.children).forEach((slide) => {
+            observer.observe(slide);
+        });
+    }
+
+    // -------------------------------------------------------------
+    // NAVIGATION (SCROLL TO PREV / NEXT)
+    // -------------------------------------------------------------
+    function scrollToSlide(index) {
+        if (index < 0 || index >= container.children.length) return;
+        const targetSlide = container.children[index];
+        if (targetSlide) {
+            targetSlide.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+
+    function scrollToNextVideo() {
+        if (state.currentIndex + 1 < container.children.length) {
+            scrollToSlide(state.currentIndex + 1);
+        } else if (state.hasMore && !state.isLoadingMore) {
+            fetchMoreVideos(() => {
+                scrollToSlide(state.currentIndex + 1);
+            });
+        }
+    }
+
+    function scrollToPrevVideo() {
+        if (state.currentIndex > 0) {
+            scrollToSlide(state.currentIndex - 1);
+        }
+    }
+
+    // -------------------------------------------------------------
+    // INFINITE SCROLL: FETCH MORE VIDEOS
+    // -------------------------------------------------------------
+    function fetchMoreVideos(callback) {
+        if (state.isLoadingMore || !state.hasMore) return;
+        state.isLoadingMore = true;
+
+        const nextQueryPage = state.page + 1;
+        const excludeList = Array.from(state.seenIds).slice(-100).join(',');
+        const params = new URLSearchParams({
+            page: nextQueryPage,
+            limit: 15,
+            mode: state.activeTab,
+            exclude_ids: excludeList
+        });
+        if (state.targetCreator) {
+            params.set('creator', state.targetCreator);
+        }
+
+        fetch(`/api/feed/videos?${params.toString()}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.videos && data.videos.length > 0) {
+                    state.page = nextQueryPage;
+                    state.hasMore = data.hasMore !== false;
+
+                    const startIndex = state.videos.length;
+                    data.videos.forEach((vid, i) => {
+                        const vidId = vid.id || vid.path;
+                        state.seenIds.add(vidId);
+                        state.videos.push(vid);
+                        const slideEl = createSlideElement(vid, startIndex + i);
+                        container.appendChild(slideEl);
+                        if (observer) observer.observe(slideEl);
+                    });
+
+                    if (typeof callback === 'function') {
+                        callback();
+                    }
+                } else {
+                    state.hasMore = false;
+                }
+            })
+            .catch(err => {
+                console.error('Lỗi nạp thêm video:', err);
+            })
+            .finally(() => {
+                state.isLoadingMore = false;
+            });
+    }
+
+    // -------------------------------------------------------------
+    // KEYBOARD SHORTCUTS
+    // -------------------------------------------------------------
+    function handleKeyDown(e) {
+        // Tránh can thiệp khi đang gõ vào input
+        if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+        switch (e.key) {
+            case 'ArrowDown':
+            case 'j':
+            case 'J':
+            case 's':
+            case 'S':
+                e.preventDefault();
+                scrollToNextVideo();
+                break;
+
+            case 'ArrowUp':
+            case 'k':
+            case 'K':
+            case 'w':
+            case 'W':
+                e.preventDefault();
+                scrollToPrevVideo();
+                break;
+
+            case ' ': // Spacebar: Play/Pause
+                e.preventDefault();
+                const curSlide = container.children[state.currentIndex];
+                if (curSlide) {
+                    const vid = curSlide.querySelector('.tiktok-video');
+                    const playIcon = curSlide.querySelector('.slide-center-play-icon');
+                    const disc = curSlide.querySelector('.action-music-disc');
+                    if (vid) {
+                        if (vid.paused) {
+                            vid.play().then(() => {
+                                if (playIcon) playIcon.classList.remove('visible');
+                                if (disc) disc.classList.add('playing');
+                            }).catch(() => {});
+                        } else {
+                            vid.pause();
+                            if (playIcon) playIcon.classList.add('visible');
+                            if (disc) disc.classList.remove('playing');
+                        }
+                    }
+                }
+                break;
+
+            case 'm':
+            case 'M':
+                e.preventDefault();
+                toggleSound();
+                break;
+
+            case 'l':
+            case 'L':
+                e.preventDefault();
+                const activeSlide = container.children[state.currentIndex];
+                if (activeSlide) {
+                    const btnLike = activeSlide.querySelector('.action-btn-like');
+                    if (btnLike) btnLike.click();
+                }
+                break;
+
+            case 'f':
+            case 'F':
+                e.preventDefault();
+                toggleFullscreen();
+                break;
+        }
+    }
+
+    // -------------------------------------------------------------
+    // TAB SWITCHING (FOR YOU / FOLLOWING)
+    // -------------------------------------------------------------
+    function switchTab(mode) {
+        if (state.activeTab === mode) return;
+        state.activeTab = mode;
+
+        if (tabFyp && tabFollowing) {
+            tabFyp.classList.toggle('active', mode === 'fyp');
+            tabFollowing.classList.toggle('active', mode === 'following');
+        }
+
+        // Reset feed và nạp lại nguồn video theo tab
+        container.innerHTML = `
+            <div style="height: 100dvh; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 0.95rem;">
+                Đang chuyển sang tab ${mode === 'following' ? 'Đang theo dõi' : 'Dành cho bạn'}...
+            </div>
+        `;
+
+        state.videos = [];
+        state.page = 1;
+        state.currentIndex = 0;
+        state.hasMore = true;
+
+        fetchMoreVideos(() => {
+            // Xóa loading placeholder
+            const placeholder = container.firstElementChild;
+            if (placeholder && placeholder.tagName === 'DIV' && !placeholder.classList.contains('tiktok-slide')) {
+                placeholder.remove();
+            }
+        });
+    }
+
+    // -------------------------------------------------------------
+    // INITIALIZATION & SERVER HYDRATION
+    // -------------------------------------------------------------
+    function init() {
+        // Đọc dữ liệu Server-Side Hydration (0ms load)
+        const scriptData = document.getElementById('__FEED_PRELOADED_DATA__');
+        let preloaded = null;
+        if (scriptData && scriptData.textContent) {
+            try {
+                preloaded = JSON.parse(scriptData.textContent);
+            } catch (e) {
+                console.warn('Lỗi parse preloaded JSON feed:', e);
+            }
+        }
+
+        // Lấy creator từ URL nếu có
+        const urlParams = new URLSearchParams(window.location.search);
+        state.targetCreator = urlParams.get('creator') || (preloaded ? preloaded.target_creator : '') || '';
+
+        // Đổ video từ Server Hydration ngay lập tức (0s chờ)
+        if (preloaded && preloaded.videos && preloaded.videos.length > 0) {
+            container.innerHTML = '';
+            preloaded.videos.forEach((vid, i) => {
+                const vidId = vid.id || vid.path;
+                state.seenIds.add(vidId);
+                state.videos.push(vid);
+                const slide = createSlideElement(vid, i);
+                container.appendChild(slide);
+            });
+            setupObserver();
+        } else {
+            // Fallback gọi API nếu chưa có hydrate
+            fetchMoreVideos();
+        }
+
+        // Gắn sự kiện giao diện
+        if (unmutePrompt) {
+            unmutePrompt.addEventListener('click', () => setMuted(false));
+        }
+        if (btnToggleSound) {
+            btnToggleSound.addEventListener('click', toggleSound);
+        }
+        if (btnToggleAutoNext) {
+            btnToggleAutoNext.addEventListener('click', () => setAutoNext(!state.autoNext));
+        }
+        if (btnToggleFullscreen) {
+            btnToggleFullscreen.addEventListener('click', toggleFullscreen);
+        }
+        if (btnDeskPrev) {
+            btnDeskPrev.addEventListener('click', scrollToPrevVideo);
+        }
+        if (btnDeskNext) {
+            btnDeskNext.addEventListener('click', scrollToNextVideo);
+        }
+        if (tabFyp) {
+            tabFyp.addEventListener('click', () => switchTab('fyp'));
+        }
+        if (tabFollowing) {
+            tabFollowing.addEventListener('click', () => switchTab('following'));
+        }
+
+        // Lắng nghe bàn phím
+        window.addEventListener('keydown', handleKeyDown);
+
+        // Chạm vào bất kỳ đâu trên màn hình lần đầu cũng kích hoạt âm thanh nếu người dùng tương tác
+        document.body.addEventListener('click', function onFirstUserGesture() {
+            if (unmutePrompt && !state.isMuted) {
+                unmutePrompt.classList.add('hidden');
+            }
+        }, { once: true });
+    }
+
+    // Khởi chạy khi DOM sẵn sàng
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>18TUBE TikTok Shorts - Lướt Video Siêu Tốc 4K</title>
+    <meta name="description" content="Trải nghiệm lướt video ngắn và full HD cực mượt phong cách TikTok / Reels dành riêng cho 18TUBE.">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/static/feed.css?v=1">
+</head>
+<body class="tiktok-feed-body">
+    <!-- TOP NAVIGATION OVERLAY -->
+    <header class="feed-top-nav">
+        <div class="nav-left">
+            <a href="/gallery" class="nav-back-btn" title="Quay lại Thư viện Gallery">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+                <span class="nav-back-text">Thư viện</span>
+            </a>
+            <div class="nav-brand">
+                <span class="brand-text">18TUBE</span>
+                <span class="brand-badge-live">SHORTS</span>
+            </div>
+        </div>
+
+        <!-- TIKTOK TABS (FOLLOWING / FOR YOU) -->
+        <div class="nav-center-tabs">
+            <button class="nav-tab" id="tab-following" data-mode="following">Đang theo dõi</button>
+            <div class="nav-tab-divider">|</div>
+            <button class="nav-tab active" id="tab-fyp" data-mode="fyp">Dành cho bạn</button>
+        </div>
+
+        <div class="nav-right-tools">
+            <!-- SOUND MUTE/UNMUTE TOGGLE -->
+            <button class="tool-btn sound-toggle-btn" id="btn-toggle-sound" title="Bật/Tắt âm thanh (Phím M)">
+                <svg id="icon-sound-on" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" style="display: none;">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+                <svg id="icon-sound-off" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <line x1="23" y1="9" x2="17" y2="15"></line>
+                    <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>
+            </button>
+
+            <!-- AUTO ADVANCE ON VIDEO END -->
+            <button class="tool-btn" id="btn-toggle-autonext" title="Tự động lướt video kế tiếp khi phát xong">
+                <span class="autonext-badge">AUTO</span>
+            </button>
+
+            <!-- FULLSCREEN TOGGLE -->
+            <button class="tool-btn" id="btn-toggle-fullscreen" title="Toàn màn hình (Phím F)">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- INITIAL UNMUTE PROMPT BANNER -->
+    <div class="feed-unmute-prompt" id="feed-unmute-prompt">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        </svg>
+        <span>Chạm để bật âm thanh 🔊</span>
+    </div>
+
+    <!-- MAIN FULLSCREEN VERTICAL FEED CONTAINER -->
+    <main class="tiktok-feed-container" id="tiktok-feed-container">
+        <!-- Slides will be inserted dynamically -->
+    </main>
+
+    <!-- DESKTOP FLOATING CONTROLS (UP / DOWN ARROWS) -->
+    <div class="desktop-nav-arrows">
+        <button class="desk-arrow-btn" id="btn-desk-prev" title="Video trước (Phím mũi tên Lên)">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"></polyline></svg>
+        </button>
+        <button class="desk-arrow-btn" id="btn-desk-next" title="Video tiếp (Phím mũi tên Xuống)">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+    </div>
+
+    <!-- DESKTOP KEYBOARD HINTS BAR -->
+    <div class="desktop-shortcuts-hint">
+        <span>↑ / ↓ Cuộn video</span>
+        <span>•</span>
+        <span>Space Dừng/Phát</span>
+        <span>•</span>
+        <span>M Bật âm</span>
+        <span>•</span>
+        <span>L Thả tim</span>
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="feed-toast-container" class="feed-toast-container"></div>
+
+    <!-- PRELOADED DATA INJECTION (SERVER HYDRATION) -->
+    <script id="__FEED_PRELOADED_DATA__" type="application/json">{{ preloaded_json or '{}' | safe }}</script>
+    <script src="/static/feed.js?v=1"></script>
+</body>
+</html>

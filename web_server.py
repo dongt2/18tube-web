@@ -20,6 +20,7 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import requests
+import random
 from urllib.parse import unquote
 from flask import Flask, render_template, jsonify, request, send_file, abort, Response, redirect
 
@@ -791,6 +792,147 @@ def gallery():
     preloaded = _get_preloaded_data(requested_creator=target, include_media=True)
     preloaded_json = json.dumps(preloaded, separators=(',', ':'), ensure_ascii=False)
     return render_template("gallery.html", preloaded_json=preloaded_json)
+
+# ----------------- TIKTOK SHORTS / REELS VERTICAL FEED -----------------
+
+_FEED_VIDEOS_CACHE = None
+_FEED_VIDEOS_CACHE_TIME = 0
+_FEED_VIDEOS_LOCK = threading.Lock()
+
+def _get_all_available_videos():
+    """
+    Quét và gom toàn bộ video từ tất cả các Creators đã cache trong SQLite (.drive_cache.db).
+    Bộ nhớ đệm RAM tự động giữ kết quả để phản hồi siêu tốc (<0.1ms).
+    """
+    global _FEED_VIDEOS_CACHE, _FEED_VIDEOS_CACHE_TIME
+    now = time.time()
+    with _FEED_VIDEOS_LOCK:
+        if _FEED_VIDEOS_CACHE is not None and (now - _FEED_VIDEOS_CACHE_TIME < 600):
+            return _FEED_VIDEOS_CACHE
+
+        all_vids = []
+        seen_ids = set()
+        try:
+            conn = _get_db()
+            with _db_lock:
+                cur = conn.cursor()
+                cur.execute("SELECT key, value FROM cache WHERE key LIKE 'drive_creator_items_%'")
+                rows = cur.fetchall()
+
+            for k, val_bytes in rows:
+                try:
+                    raw_str = zlib.decompress(val_bytes).decode("utf-8")
+                    item = json.loads(raw_str)
+                    data = item.get("data") if (isinstance(item, dict) and "data" in item) else item
+                    if not isinstance(data, dict):
+                        continue
+                    creator_name = data.get("name") or (k.replace("drive_creator_items_", "").split("/")[-1])
+                    creator_country = data.get("country", "")
+                    creator_slug = data.get("slug") or k.replace("drive_creator_items_", "")
+                    
+                    vlist = data.get("videos") or []
+                    for v in vlist:
+                        vid_id = v.get("id") or v.get("path")
+                        if not vid_id or vid_id in seen_ids:
+                            continue
+                        seen_ids.add(vid_id)
+                        if not v.get("creator"):
+                            v["creator"] = creator_name
+                        if not v.get("country") and creator_country:
+                            v["country"] = creator_country
+                        if not v.get("slug"):
+                            v["slug"] = creator_slug
+                        all_vids.append(v)
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"Lỗi gom video cho feed: {e}")
+
+        _FEED_VIDEOS_CACHE = all_vids
+        _FEED_VIDEOS_CACHE_TIME = now
+        return _FEED_VIDEOS_CACHE
+
+@app.route("/feed")
+@app.route("/tiktok")
+@app.route("/shorts")
+def feed():
+    """
+    Trang lướt video ngắn và full HD toàn màn hình phong cách TikTok Shorts / Reels.
+    Tự động Server-Side Hydration sẵn lô 15 video đầu tiên để hiển thị tức thì (0ms chờ).
+    """
+    target_creator = request.args.get("creator", "").strip()
+    all_videos = _get_all_available_videos()
+    
+    if target_creator:
+        filtered = [v for v in all_videos if target_creator.lower() in (v.get("creator", "") or "").lower() or target_creator.lower() in (v.get("slug", "") or "").lower()]
+        display_videos = filtered if filtered else all_videos
+    else:
+        display_videos = list(all_videos)
+        random.shuffle(display_videos)
+    
+    initial_batch = display_videos[:15]
+    creators, _ = get_drive_creators_hierarchy(force=False)
+    
+    preloaded = {
+        "videos": initial_batch,
+        "total_available": len(display_videos),
+        "target_creator": target_creator,
+        "creators_summary": [{"name": c.get("name"), "slug": c.get("slug"), "country": c.get("country"), "videos_count": c.get("videos_count", 0)} for c in creators[:50]]
+    }
+    preloaded_json = json.dumps(preloaded, separators=(',', ':'), ensure_ascii=False)
+    return render_template("feed.html", preloaded_json=preloaded_json)
+
+@app.route("/api/feed/videos")
+def api_feed_videos():
+    """
+    API nạp cuộn vô tận (Infinite Scroll) các video cho TikTok Feed.
+    Hỗ trợ lọc theo creator, chế độ Dành cho bạn / Đang theo dõi, và loại trừ video đã xem.
+    """
+    target_creator = request.args.get("creator", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        limit = min(30, max(5, int(request.args.get("limit", 15))))
+    except (ValueError, TypeError):
+        limit = 15
+
+    exclude_ids = set(request.args.get("exclude_ids", "").split(",")) if request.args.get("exclude_ids") else set()
+    mode = request.args.get("mode", "fyp")
+
+    all_videos = _get_all_available_videos()
+    if target_creator:
+        pool = [v for v in all_videos if target_creator.lower() in (v.get("creator", "") or "").lower() or target_creator.lower() in (v.get("slug", "") or "").lower()]
+        if not pool:
+            pool = all_videos
+    elif mode == "following":
+        pool = [v for v in all_videos if (v.get("country") == "Việt Nam" or int(v.get("size", 0)) > 50*1024*1024)]
+        if not pool:
+            pool = all_videos
+        random.shuffle(pool)
+    else:
+        pool = list(all_videos)
+        random.shuffle(pool)
+
+    fresh_pool = [v for v in pool if (v.get("id") or v.get("path")) not in exclude_ids]
+    if len(fresh_pool) < limit:
+        fresh_pool = pool
+
+    start_idx = (page - 1) * limit
+    batch = fresh_pool[start_idx:start_idx + limit]
+    if not batch and fresh_pool:
+        random.shuffle(fresh_pool)
+        batch = fresh_pool[:limit]
+
+    return jsonify({
+        "success": True,
+        "videos": batch,
+        "page": page,
+        "limit": limit,
+        "total": len(pool),
+        "has_more": True
+    })
 
 @app.route("/favicon.ico")
 def favicon():

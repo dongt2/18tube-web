@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/gallery.css?v=11">
+    <link rel="stylesheet" href="/static/gallery.css?v=12">
 </head>
 <body class="cinema-theme">
     <div id="gallery-app" class="cinema-layout">
@@ -212,11 +212,6 @@
                     <h3 id="theater-video-title">Tên Video</h3>
                 </div>
                 <div class="theater-controls-top">
-                    <!-- PLAYER ENGINE TOGGLES -->
-                    <div class="theater-engine-group" id="theater-engine-group">
-                        <button class="theater-engine-btn active" id="btn-engine-html5" title="Phát trực tiếp qua trình phát Video.js">⚡ Video.js Player</button>
-                        <button class="theater-engine-btn" id="btn-engine-drive" title="Xem qua Trình phát Google Drive">☁️ Drive Embed</button>
-                    </div>
                     <!-- THEATER FAVORITE BUTTON -->
                     <button class="theater-btn-tool" id="btn-theater-fav" title="Thêm/Xóa khỏi danh sách yêu thích">
                         <span id="theater-fav-icon">🤍</span>
@@ -236,7 +231,6 @@
                     <video id="theater-video" class="video-js vjs-default-skin vjs-big-play-centered" controls autoplay playsinline preload="metadata">
                         <p class="vjs-no-js">Trình duyệt không hỗ trợ thẻ video.</p>
                     </video>
-                    <iframe id="theater-drive-iframe" allow="autoplay; fullscreen" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
                 </div>
 
                 <!-- PLAYLIST SIDEBAR (TIẾP THEO) -->
@@ -503,6 +497,6 @@
 
     <!-- Video.js Script -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-    <script src="/static/gallery.js?v=13"></script>
+    <script src="/static/gallery.js?v=14"></script>
 </body>
 </html>

@@ -30,7 +30,6 @@
         videoList: [],
         isLooping: false,
         autoNext: true,
-        playerEngine: 'html5', // 'html5' or 'drive'
 
         // Photo Lightbox
         currentPhotoIndex: -1,
@@ -68,11 +67,8 @@
         theaterModal: document.getElementById('theater-modal'),
         theaterBackdrop: document.getElementById('theater-backdrop'),
         theaterVideo: document.getElementById('theater-video'),
-        theaterDriveIframe: document.getElementById('theater-drive-iframe'),
         theaterVideoTitle: document.getElementById('theater-video-title'),
         theaterEngineBadge: document.getElementById('theater-engine-badge'),
-        btnEngineHtml5: document.getElementById('btn-engine-html5'),
-        btnEngineDrive: document.getElementById('btn-engine-drive'),
         theaterCloseBtn: document.getElementById('btn-theater-close'),
         theaterLoopBtn: document.getElementById('btn-theater-loop'),
         theaterPipBtn: document.getElementById('btn-theater-pip'),
@@ -484,19 +480,11 @@
                 elements.theaterVideo.pause();
                 elements.theaterVideo.muted = true;
             }
-            if (elements.theaterDriveIframe && elements.theaterDriveIframe.src) {
-                elements.theaterDriveIframe.setAttribute('data-saved-src', elements.theaterDriveIframe.src);
-                elements.theaterDriveIframe.src = '';
-            }
 
             savedOriginalTitle = document.title;
             document.title = 'Bao_Cao_Ke_Hoach_Tai_Chinh_Q3-Q4_2026_Final.xlsx - Google Trang tính';
         } else {
             document.title = savedOriginalTitle || '18TUBE Cinema & Gallery - Trình Xem Video & Ảnh';
-            if (elements.theaterDriveIframe && elements.theaterDriveIframe.getAttribute('data-saved-src')) {
-                elements.theaterDriveIframe.src = elements.theaterDriveIframe.getAttribute('data-saved-src');
-                elements.theaterDriveIframe.removeAttribute('data-saved-src');
-            }
         }
     }
 
@@ -1262,12 +1250,7 @@
                 });
 
                 vjsPlayer.on('error', () => {
-                    const vid = state.videoList[state.currentVideoIndex];
-                    if (vid && vid.drive_preview_url && state.playerEngine !== 'drive') {
-                        showToast('Video.js chuyển sang Google Drive Embed...', 'info');
-                        state.playerEngine = 'drive';
-                        playTheaterVideo(state.currentVideoIndex);
-                    }
+                    showToast('Không thể phát video này hoặc lỗi kết nối!', 'warning');
                 });
             } catch (err) {
                 console.warn('Video.js init fallback:', err);
@@ -1302,7 +1285,7 @@
             if (resumeApplied || !savedProg || savedProg.time <= 5) return;
             resumeApplied = true;
             try {
-                if (vjsPlayer && state.playerEngine !== 'drive') {
+                if (vjsPlayer) {
                     vjsPlayer.currentTime(savedProg.time);
                 } else if (elements.theaterVideo) {
                     elements.theaterVideo.currentTime = savedProg.time;
@@ -1315,70 +1298,46 @@
         if (vid.drive_url) {
             elements.theaterExternalBtn.href = vid.drive_url;
             elements.theaterExternalBtn.style.display = 'inline-flex';
-            elements.btnEngineDrive.style.display = 'inline-block';
         } else {
             elements.theaterExternalBtn.style.display = 'none';
-            elements.btnEngineDrive.style.display = 'none';
         }
 
         const player = getOrCreatePlayer();
 
-        // Switch between Video.js Player vs Google Drive Embed Player
-        if (state.playerEngine === 'drive' && vid.drive_preview_url) {
-            if (player) {
-                player.pause();
-                const vjsEl = player.el();
-                if (vjsEl) vjsEl.style.display = 'none';
-            } else if (elements.theaterVideo) {
-                elements.theaterVideo.pause();
-                elements.theaterVideo.style.display = 'none';
-            }
-            elements.theaterDriveIframe.style.display = 'block';
-            elements.theaterDriveIframe.src = vid.drive_preview_url;
-            elements.theaterEngineBadge.textContent = '☁️ DRIVE EMBED';
-            elements.btnEngineDrive.classList.add('active');
-            elements.btnEngineHtml5.classList.remove('active');
-        } else {
-            // Video.js Cinema Player (Default)
-            if (elements.theaterDriveIframe) {
-                elements.theaterDriveIframe.src = '';
-                elements.theaterDriveIframe.style.display = 'none';
-            }
-
-            if (player) {
-                const vjsEl = player.el();
-                if (vjsEl) vjsEl.style.display = 'block';
-                player.src({ src: vid.stream_url, type: 'video/mp4' });
-                player.ready(() => {
-                    player.play().catch(() => {
-                        player.muted(true);
-                        player.play().catch(() => { });
-                    });
-                    if (savedProg && savedProg.time > 5) {
-                        player.one('loadedmetadata', applyResume);
-                    }
+        // Phát qua Video.js Player
+        if (player) {
+            const vjsEl = player.el();
+            if (vjsEl) vjsEl.style.display = 'block';
+            player.src({ src: vid.stream_url, type: 'video/mp4' });
+            player.ready(() => {
+                player.play().catch(() => {
+                    player.muted(true);
+                    player.play().catch(() => { });
                 });
-                player.loop(state.isLooping);
-            } else {
-                elements.theaterVideo.style.display = 'block';
-                elements.theaterVideo.src = vid.stream_url;
-                elements.theaterVideo.load();
                 if (savedProg && savedProg.time > 5) {
-                    const onLoaded = () => {
-                        applyResume();
-                        elements.theaterVideo.removeEventListener('loadedmetadata', onLoaded);
-                    };
-                    elements.theaterVideo.addEventListener('loadedmetadata', onLoaded);
+                    player.one('loadedmetadata', applyResume);
                 }
-                elements.theaterVideo.play().catch(() => {
-                    elements.theaterVideo.muted = true;
-                    elements.theaterVideo.play().catch(() => { });
-                });
+            });
+            player.loop(state.isLooping);
+        } else {
+            elements.theaterVideo.style.display = 'block';
+            elements.theaterVideo.src = vid.stream_url;
+            elements.theaterVideo.load();
+            if (savedProg && savedProg.time > 5) {
+                const onLoaded = () => {
+                    applyResume();
+                    elements.theaterVideo.removeEventListener('loadedmetadata', onLoaded);
+                };
+                elements.theaterVideo.addEventListener('loadedmetadata', onLoaded);
             }
+            elements.theaterVideo.play().catch(() => {
+                elements.theaterVideo.muted = true;
+                elements.theaterVideo.play().catch(() => { });
+            });
+        }
 
+        if (elements.theaterEngineBadge) {
             elements.theaterEngineBadge.textContent = '🎬 VIDEO.JS';
-            elements.btnEngineHtml5.classList.add('active');
-            elements.btnEngineDrive.classList.remove('active');
         }
 
         renderTheaterPlaylist();
@@ -1421,9 +1380,6 @@
         } else if (elements.theaterVideo) {
             elements.theaterVideo.pause();
             elements.theaterVideo.src = '';
-        }
-        if (elements.theaterDriveIframe) {
-            elements.theaterDriveIframe.src = '';
         }
     }
 
@@ -1666,20 +1622,6 @@
         // Theater modal events
         elements.theaterCloseBtn.addEventListener('click', closeTheater);
         elements.theaterBackdrop.addEventListener('click', closeTheater);
-
-        // Player Engine switches (Cinema HTML5 vs Drive Embed)
-        elements.btnEngineHtml5.addEventListener('click', () => {
-            state.playerEngine = 'html5';
-            if (state.currentVideoIndex >= 0) {
-                playTheaterVideo(state.currentVideoIndex);
-            }
-        });
-        elements.btnEngineDrive.addEventListener('click', () => {
-            state.playerEngine = 'drive';
-            if (state.currentVideoIndex >= 0) {
-                playTheaterVideo(state.currentVideoIndex);
-            }
-        });
 
         // Auto next on video end
         if (elements.theaterVideo) {

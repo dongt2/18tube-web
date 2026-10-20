@@ -976,37 +976,6 @@ body.cinema-theme {
     gap: 0.5rem;
 }
 
-.theater-engine-group {
-    display: flex;
-    background: rgba(0, 0, 0, 0.45);
-    border: 1px solid var(--c-border);
-    border-radius: 6px;
-    padding: 2px;
-    margin-right: 0.35rem;
-}
-
-.theater-engine-btn {
-    background: transparent;
-    border: none;
-    color: var(--c-text-muted);
-    padding: 0.25rem 0.6rem;
-    border-radius: 4px;
-    font-size: 0.74rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.theater-engine-btn:hover {
-    color: #fff;
-}
-
-.theater-engine-btn.active {
-    background: linear-gradient(135deg, #0284c7, #00f2fe);
-    color: #04060a;
-    font-weight: 700;
-}
-
 .theater-btn-tool {
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid var(--c-border);
@@ -2019,12 +1988,6 @@ kbd {
         align-items: center;
         gap: 0.25rem;
         flex-shrink: 0;
-    }
-
-    .theater-engine-btn {
-        padding: 0.22rem 0.45rem;
-        font-size: 0.68rem;
-        border-radius: 6px;
     }
 
     .theater-btn-tool {

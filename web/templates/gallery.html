@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/gallery.css?v=12">
+    <link rel="stylesheet" href="/static/gallery.css?v=16">
 </head>
 <body class="cinema-theme">
     <div id="gallery-app" class="cinema-layout">
@@ -90,7 +90,7 @@
 
         <!-- SUB HEADER: 2-TIER MODERN CONTROL HUB -->
         <div class="gallery-subbar">
-            <!-- TIER 1: PRIMARY TOOLBAR (MEDIA TABS, SELECTS & SORT) -->
+            <!-- TIER 1: PRIMARY TOOLBAR (MEDIA TABS, SORT, ASPECT & VIEW SETTINGS) -->
             <div class="subbar-toolbar-tier">
                 <!-- LEFT: MEDIA TYPE FILTERS -->
                 <div class="media-type-filters">
@@ -112,24 +112,9 @@
                     </button>
                 </div>
 
-                <!-- CENTER: QUICK DROPDOWNS (COUNTRY & CREATOR) -->
-                <div class="quick-dropdowns-group">
-                    <div class="glass-select-capsule">
-                        <span class="capsule-icon">🌍</span>
-                        <label for="country-select" class="capsule-label">Quốc gia:</label>
-                        <select id="country-select" class="cinema-select-box">
-                            <option value="all">Tất cả Quốc Gia</option>
-                        </select>
-                    </div>
-
-                    <div class="glass-select-capsule">
-                        <span class="capsule-icon">👤</span>
-                        <label for="creator-select" class="capsule-label">Creator:</label>
-                        <select id="creator-select" class="cinema-select-box">
-                            <option value="">Đang tải...</option>
-                        </select>
-                    </div>
-                </div>
+                <!-- HIDDEN SELECTS FOR JAVASCRIPT STATE COMPATIBILITY (REMOVING UI DUPLICATION) -->
+                <select id="country-select" style="display: none;"><option value="all">Tất cả Quốc Gia</option></select>
+                <select id="creator-select" style="display: none;"><option value="">Đang tải...</option></select>
 
                 <!-- RIGHT: SORTING & VIEW SETTINGS -->
                 <div class="toolbar-right-controls">
@@ -145,6 +130,11 @@
                         </select>
                     </div>
 
+                    <!-- ASPECT RATIO TOGGLE (3:4 PORTRAIT / 16:9 CINEMA) -->
+                    <button id="btn-toggle-aspect" class="aspect-toggle-btn" title="Chuyển đổi tỉ lệ ảnh (3:4 Chân dung / 16:9 Rạp chiếu)">
+                        <span>📐 3:4 Dọc</span>
+                    </button>
+
                     <!-- HOVER PREVIEW TOGGLE -->
                     <button id="btn-toggle-hover-preview" class="hover-preview-toggle-btn active" title="Bật/Tắt xem trước video khi rê chuột (Hover Video Preview)">
                         <span>👁️ Preview: Bật</span>
@@ -159,9 +149,6 @@
                             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>
                         </button>
                     </div>
-
-                    <!-- STATUS COUNTER -->
-                    <span class="media-counter-text" id="media-status-text">Đang tải...</span>
                 </div>
             </div>
 
@@ -189,6 +176,16 @@
 
         <!-- MAIN MEDIA GALLERY CONTAINER -->
         <main class="gallery-main">
+            <!-- DEDICATED TOP BAR: STATUS COUNTER & TOP PAGINATION (NEVER TRUNCATED) -->
+            <div class="gallery-top-bar" id="gallery-top-bar">
+                <div class="top-bar-left">
+                    <span class="media-counter-text" id="media-status-text">Đang tải...</span>
+                </div>
+                <div class="top-bar-right">
+                    <div class="gallery-top-pagination" id="gallery-top-pagination" style="display: none;"></div>
+                </div>
+            </div>
+
             <!-- MEDIA GRID -->
             <div class="cinema-grid" id="cinema-grid">
                 <div class="cinema-loading">
@@ -498,6 +495,6 @@
     <!-- Video.js Script -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script id="__PRELOADED_DATA__" type="application/json">{{ preloaded_json or '{}' | safe }}</script>
-    <script src="/static/gallery.js?v=15"></script>
+    <script src="/static/gallery.js?v=17"></script>
 </body>
 </html>

@@ -98,6 +98,8 @@
 
         toastContainer: document.getElementById('cinema-toast-container'),
         galleryPagination: document.getElementById('gallery-pagination'),
+        galleryTopPagination: document.getElementById('gallery-top-pagination'),
+        btnToggleAspect: document.getElementById('btn-toggle-aspect'),
 
         // New feature elements: Favorites, Random & Boss Mode
         badgeCntFav: document.getElementById('badge-cnt-fav'),
@@ -1126,6 +1128,7 @@
             `;
             elements.mediaStatusText.textContent = '0 tệp tin';
             if (elements.galleryPagination) elements.galleryPagination.style.display = 'none';
+            if (elements.galleryTopPagination) elements.galleryTopPagination.style.display = 'none';
             return;
         }
 
@@ -1183,6 +1186,28 @@
     }
 
     function renderPaginationControls(totalPages, totalItems) {
+        // 1. THANH PHÂN TRANG NHANH Ở TRÊN ĐẦU (TOP PAGINATION)
+        if (elements.galleryTopPagination) {
+            if (totalPages <= 1) {
+                elements.galleryTopPagination.style.display = 'none';
+            } else {
+                elements.galleryTopPagination.style.display = 'inline-flex';
+                elements.galleryTopPagination.innerHTML = `
+                    <button class="top-page-btn" data-top-page="${state.currentPage - 1}" ${state.currentPage === 1 ? 'disabled' : ''} title="Trang trước">◀ Trước</button>
+                    <span class="top-page-badge">Trang <strong>${state.currentPage}</strong> / ${totalPages}</span>
+                    <button class="top-page-btn" data-top-page="${state.currentPage + 1}" ${state.currentPage === totalPages ? 'disabled' : ''} title="Trang kế tiếp">Sau ▶</button>
+                `;
+                elements.galleryTopPagination.querySelectorAll('.top-page-btn[data-top-page]').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const p = parseInt(btn.getAttribute('data-top-page'), 10);
+                        if (!isNaN(p)) goToPage(p);
+                    });
+                });
+            }
+        }
+
+        // 2. THANH PHÂN TRANG ĐẦY ĐỦ Ở CUỐI TRANG (BOTTOM PAGINATION)
         if (!elements.galleryPagination) return;
         if (totalPages <= 1) {
             elements.galleryPagination.style.display = 'none';
@@ -1847,6 +1872,25 @@
                 elements.btnToggleHoverPreview.innerHTML = hoverPreviewEnabled ? '<span>👁️ Preview: Bật</span>' : '<span>👁️ Preview: Tắt</span>';
                 if (!hoverPreviewEnabled) stopHoverPreview();
                 showToast(hoverPreviewEnabled ? 'Đã bật xem trước video khi rê chuột' : 'Đã tắt xem trước video');
+            });
+        }
+
+        // Aspect Ratio Toggle Button (3:4 Portrait / 16:9 Cinema)
+        if (elements.btnToggleAspect) {
+            const savedAspect = localStorage.getItem('18tube_aspect_ratio') || '3-4';
+            if (savedAspect === '16-9') {
+                elements.cinemaGrid.classList.add('aspect-16-9');
+                elements.btnToggleAspect.innerHTML = '<span>📐 16:9 Ngang</span>';
+            } else {
+                elements.cinemaGrid.classList.remove('aspect-16-9');
+                elements.btnToggleAspect.innerHTML = '<span>📐 3:4 Dọc</span>';
+            }
+
+            elements.btnToggleAspect.addEventListener('click', () => {
+                const is169 = elements.cinemaGrid.classList.toggle('aspect-16-9');
+                localStorage.setItem('18tube_aspect_ratio', is169 ? '16-9' : '3-4');
+                elements.btnToggleAspect.innerHTML = is169 ? '<span>📐 16:9 Ngang</span>' : '<span>📐 3:4 Dọc</span>';
+                showToast(is169 ? '📐 Đã chuyển sang tỉ lệ 16:9 (Rạp chiếu ngang)' : '📐 Đã chuyển sang tỉ lệ 3:4 (Chân dung dọc xem rõ mặt)', 'info');
             });
         }
 

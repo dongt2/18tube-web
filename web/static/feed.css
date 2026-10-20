@@ -243,7 +243,10 @@ html, body {
     height: 100dvh;
     overflow-y: scroll;
     scroll-snap-type: y mandatory;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
     -ms-overflow-style: none;
+    scrollbar-width: none;
 }
 
 .tiktok-feed-container::-webkit-scrollbar {
@@ -263,6 +266,8 @@ html, body {
     justify-content: center;
     background: #000000;
     overflow: hidden;
+    contain: layout paint;
+    will-change: transform;
 }
 
 /* BLURRED AMBIENT BACKDROP (FOR WIDESCREEN DESKTOP) */
@@ -274,10 +279,11 @@ html, body {
     bottom: 0;
     background-size: cover;
     background-position: center;
-    filter: blur(60px) brightness(0.28) saturate(1.8);
-    transform: scale(1.2);
+    filter: blur(40px) brightness(0.28) saturate(1.5);
+    transform: scale(1.15) translateZ(0);
     z-index: 1;
     pointer-events: none;
+    will-change: transform;
 }
 
 /* VIDEO STAGE CONTAINER */
@@ -292,6 +298,7 @@ html, body {
     justify-content: center;
     z-index: 2;
     background: #000000;
+    transform: translateZ(0);
 }
 
 .tiktok-video {

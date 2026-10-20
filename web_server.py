@@ -950,12 +950,27 @@ def api_feed_videos():
 
     fresh_pool = [v for v in pool if (v.get("id") or v.get("path")) not in exclude_ids]
     if len(fresh_pool) < limit:
-        fresh_pool = pool
-
-    start_idx = (page - 1) * limit
-    batch = fresh_pool[start_idx:start_idx + limit]
-    if not batch and fresh_pool:
-        random.shuffle(fresh_pool)
+        # Khi đã xem gần hết hoặc hết kho, tái tuần hoàn video từ pool
+        shuffled = list(pool)
+        random.shuffle(shuffled)
+        seen_in_batch = set()
+        batch = []
+        for v in fresh_pool:
+            vid_key = v.get("id") or v.get("path")
+            if vid_key and vid_key not in seen_in_batch:
+                seen_in_batch.add(vid_key)
+                batch.append(v)
+        for v in shuffled:
+            if len(batch) >= limit:
+                break
+            vid_key = v.get("id") or v.get("path")
+            if vid_key not in seen_in_batch:
+                seen_in_batch.add(vid_key)
+                batch.append(v)
+        if not batch:
+            batch = shuffled[:limit]
+    else:
+        # fresh_pool đã lọc toàn bộ exclude_ids nên batch tiếp theo luôn là limit video đầu tiên của fresh_pool
         batch = fresh_pool[:limit]
 
     return jsonify({
@@ -964,7 +979,8 @@ def api_feed_videos():
         "page": page,
         "limit": limit,
         "total": len(pool),
-        "has_more": True
+        "has_more": True,
+        "hasMore": True
     })
 
 @app.route("/favicon.ico")
@@ -1635,9 +1651,15 @@ def api_media_drive_stream():
         def generate():
             # 256KB cho streaming phát ngay không trễ; 1MB cho download file trọn vẹn
             chunk_size = 1024 * 1024 if is_download else 256 * 1024
-            for chunk in resp.iter_content(chunk_size=chunk_size):
-                if chunk:
-                    yield chunk
+            try:
+                for chunk in resp.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        yield chunk
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
         return Response(generate(), status=resp.status_code, headers=response_headers)
     except Exception:

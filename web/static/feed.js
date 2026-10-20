@@ -161,6 +161,7 @@
         const isFollowing = state.followedCreators.has(creatorName);
         const likesCount = getEstimatedLikes(videoId) + (isLiked ? 1 : 0);
         const streamUrl = video.stream_url || (video.id ? `/api/media/drive/stream?id=${video.id}&name=${encodeURIComponent(video.name || 'video.mp4')}` : '');
+        slide.dataset.streamUrl = streamUrl;
         const posterUrl = video.thumbnail_url || (video.id ? `https://lh3.googleusercontent.com/d/${video.id}=w800` : '/static/placeholder.svg');
         const driveUrl = video.drive_view_url || (video.id ? `https://drive.google.com/file/d/${video.id}/view` : '#');
         const country = video.country || 'Việt Nam';
@@ -169,6 +170,11 @@
         // Tên đại diện và avatar cho creator
         const avatarLetter = (creatorName[0] || 'C').toUpperCase();
 
+        // Chỉ gắn src cho 2 video đầu tiên để tránh nghẽn socket HTTP 206
+        const shouldAttachSrc = index <= 1;
+        const videoSrcAttr = shouldAttachSrc ? `src="${streamUrl}"` : '';
+        const initialPreload = index === 0 ? 'auto' : (index === 1 ? 'metadata' : 'none');
+
         slide.innerHTML = `
             <!-- AMBIENT BLUR BACKDROP -->
             <div class="slide-ambient-blur" style="background-image: url('${posterUrl}')"></div>
@@ -176,15 +182,14 @@
             <!-- MAIN VIDEO STAGE -->
             <div class="slide-video-wrap">
                 <video class="tiktok-video" 
-                       src="${streamUrl}"
+                       ${videoSrcAttr}
                        playsinline 
                        webkit-playsinline 
                        x5-playsinline
                        loop 
                        muted
-                       preload="${index <= 1 ? 'auto' : 'metadata'}" 
+                       preload="${initialPreload}" 
                        poster="${posterUrl}">
-                    <source src="${streamUrl}" type="video/mp4">
                 </video>
 
                 <!-- CENTER PLAY / PAUSE PULSE INDICATOR -->
@@ -483,6 +488,45 @@
     }
 
     // -------------------------------------------------------------
+    // VIRTUAL VIDEO WINDOW (PREVENTS CONNECTION STARVATION & STUTTER)
+    // -------------------------------------------------------------
+    function manageVideoWindow(centerIndex) {
+        if (!container) return;
+        const total = container.children.length;
+        const BUFFER_RADIUS = 2; // Giữ video trong phạm vi [centerIndex - 2, centerIndex + 2]
+
+        for (let i = 0; i < total; i++) {
+            const slide = container.children[i];
+            if (!slide || !slide.classList.contains('tiktok-slide')) continue;
+
+            const vid = slide.querySelector('.tiktok-video');
+            if (!vid) continue;
+
+            const dist = Math.abs(i - centerIndex);
+            const streamUrl = slide.dataset.streamUrl;
+
+            if (dist <= BUFFER_RADIUS) {
+                // Trong vùng đệm lướt: gắn src nếu chưa có để sẵn sàng phát tức thì
+                if (streamUrl && (!vid.src || vid.src === '' || vid.src === window.location.href)) {
+                    vid.src = streamUrl;
+                    vid.preload = (dist === 0 || dist === 1) ? 'auto' : 'metadata';
+                    vid.load();
+                } else if (dist === 1 && vid.preload !== 'auto') {
+                    vid.preload = 'auto';
+                }
+            } else {
+                // Ngoài vùng đệm (> 2 slide): dọn dẹp triệt để giải phóng TCP connection & GPU buffer
+                if (vid.src && vid.src !== '' && vid.src !== window.location.href) {
+                    vid.pause();
+                    vid.removeAttribute('src');
+                    vid.load(); // Ngắt kết nối socket HTTP 206 ngay lập tức
+                    delete vid.dataset.userPaused;
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------
     // SINGLE-ACTIVE-SLIDE VIDEO CONTROLLER
     // -------------------------------------------------------------
     let currentActiveIndex = -1;
@@ -505,7 +549,10 @@
         currentActiveIndex = index;
         state.currentIndex = index;
 
-        // 1. DỪNG TRIỆT ĐỂ TOÀN BỘ VIDEO KHÁC (NGĂN CHẶN 100% LỖI PHÁT NGẦM KHI LƯỚT QUA)
+        // 1. Quản lý cửa sổ trượt nạp video (giải phóng kết nối mạng & GPU RAM)
+        manageVideoWindow(index);
+
+        // 2. DỪNG TRIỆT ĐỂ TOÀN BỘ VIDEO KHÁC (NGĂN CHẶN 100% LỖI PHÁT NGẦM KHI LƯỚT QUA)
         Array.from(container.children).forEach((slide, i) => {
             if (i !== index) {
                 const otherVid = slide.querySelector('.tiktok-video');
@@ -514,7 +561,7 @@
 
                 if (otherVid) {
                     otherVid.pause();
-                    otherVid.currentTime = 0;
+                    if (otherVid.currentTime > 0) otherVid.currentTime = 0;
                     delete otherVid.dataset.userPaused;
                 }
                 if (otherDisc) otherDisc.classList.remove('playing');
@@ -522,7 +569,7 @@
             }
         });
 
-        // 2. PHÁT VIDEO MỤC TIÊU
+        // 3. PHÁT VIDEO MỤC TIÊU
         const activeSlide = container.children[index];
         if (!activeSlide) return;
 
@@ -531,6 +578,15 @@
         const activePlayIcon = activeSlide.querySelector('.slide-center-play-icon');
 
         if (activeVid) {
+            // Đảm bảo có streamUrl
+            if (!activeVid.src || activeVid.src === '' || activeVid.src === window.location.href) {
+                const streamUrl = activeSlide.dataset.streamUrl;
+                if (streamUrl) {
+                    activeVid.src = streamUrl;
+                    activeVid.load();
+                }
+            }
+
             activeVid.muted = state.isMuted;
             activeVid.defaultMuted = state.isMuted;
             delete activeVid.dataset.userPaused;
@@ -571,7 +627,7 @@
             }
         }
 
-        // 3. Tải ngầm trước video tiếp theo (preload auto)
+        // 4. Tải trước tiếp theo (preload auto)
         const nextSlide = container.children[index + 1];
         if (nextSlide) {
             const nextVid = nextSlide.querySelector('.tiktok-video');
@@ -580,8 +636,8 @@
             }
         }
 
-        // 4. Nạp thêm video vô tận khi còn cách cuối 3 video
-        if (index >= state.videos.length - 3 && !state.isLoadingMore && state.hasMore) {
+        // 5. Nạp thêm video vô tận khi còn cách cuối 5 video
+        if (index >= state.videos.length - 5 && !state.isLoadingMore && state.hasMore) {
             fetchMoreVideos();
         }
     }
@@ -596,7 +652,7 @@
 
         observer = new IntersectionObserver((entries) => {
             entries.forEach((entry) => {
-                if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                if (entry.isIntersecting && entry.intersectionRatio >= 0.65) {
                     const slideIndex = parseInt(entry.target.dataset.index, 10);
                     if (!isNaN(slideIndex)) {
                         playActiveSlide(slideIndex);
@@ -605,7 +661,7 @@
             });
         }, {
             root: container,
-            threshold: [0.5, 0.75]
+            threshold: [0.65]
         });
 
         Array.from(container.children).forEach((slide) => {
@@ -615,20 +671,26 @@
         });
     }
 
-    // Lắng nghe thêm sự kiện Scroll để bắt dính 100% chính xác ngay cả khi cuộn nhanh
+    // Lắng nghe sự kiện scrollend & scroll để đồng bộ dứt khoát khi cuộn dừng
     let scrollDebounceTimer = null;
     if (container) {
+        function syncScrollSnapTarget() {
+            const clientH = container.clientHeight || window.innerHeight;
+            if (clientH > 0) {
+                const targetIdx = Math.round(container.scrollTop / clientH);
+                if (targetIdx >= 0 && targetIdx < container.children.length && targetIdx !== currentActiveIndex) {
+                    playActiveSlide(targetIdx);
+                }
+            }
+        }
+
+        if ('onscrollend' in window || 'onscrollend' in container) {
+            container.addEventListener('scrollend', syncScrollSnapTarget, { passive: true });
+        }
+
         container.addEventListener('scroll', () => {
             if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
-            scrollDebounceTimer = setTimeout(() => {
-                const clientH = container.clientHeight || window.innerHeight;
-                if (clientH > 0) {
-                    const targetIdx = Math.round(container.scrollTop / clientH);
-                    if (targetIdx >= 0 && targetIdx < container.children.length && targetIdx !== currentActiveIndex) {
-                        playActiveSlide(targetIdx);
-                    }
-                }
-            }, 60);
+            scrollDebounceTimer = setTimeout(syncScrollSnapTarget, 80);
         }, { passive: true });
     }
 
@@ -684,7 +746,7 @@
             .then(data => {
                 if (data.success && data.videos && data.videos.length > 0) {
                     state.page = nextQueryPage;
-                    state.hasMore = data.hasMore !== false;
+                    state.hasMore = (data.has_more !== undefined ? data.has_more : data.hasMore) !== false;
 
                     const startIndex = state.videos.length;
                     data.videos.forEach((vid, i) => {
@@ -695,6 +757,9 @@
                         container.appendChild(slideEl);
                         if (observer) observer.observe(slideEl);
                     });
+
+                    // Cập nhật cửa sổ trượt nạp video cho các slide vừa thêm
+                    manageVideoWindow(state.currentIndex);
 
                     if (typeof callback === 'function') {
                         callback();

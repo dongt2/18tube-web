@@ -667,7 +667,7 @@
         if (state.isLoadingMore || !state.hasMore) return;
         state.isLoadingMore = true;
 
-        const nextQueryPage = state.page + 1;
+        const nextQueryPage = state.videos.length === 0 ? 1 : state.page + 1;
         const excludeList = Array.from(state.seenIds).slice(-100).join(',');
         const params = new URLSearchParams({
             page: nextQueryPage,
@@ -701,14 +701,35 @@
                     }
                 } else {
                     state.hasMore = false;
+                    if (state.videos.length === 0) {
+                        renderEmptyState();
+                    }
                 }
             })
             .catch(err => {
                 console.error('Lỗi nạp thêm video:', err);
+                if (state.videos.length === 0) {
+                    renderEmptyState();
+                }
             })
             .finally(() => {
                 state.isLoadingMore = false;
             });
+    }
+
+    function renderEmptyState() {
+        if (!container || container.querySelector('.tiktok-slide')) return;
+        container.innerHTML = `
+            <div class="feed-empty-state" style="height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; color: #94a3b8; text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem;">🎬</div>
+                <h3 style="color: #fff; font-size: 1.25rem;">Chưa có video trong kho Shorts</h3>
+                <p style="max-width: 400px; font-size: 0.9rem; line-height: 1.5; color: #cbd5e1;">Kho video Google Drive đang được đồng bộ hoặc creator chưa có video nào. Bạn có thể quay lại Thư viện Gallery để khám phá toàn bộ media.</p>
+                <div style="display: flex; gap: 0.75rem; margin-top: 0.5rem;">
+                    <button onclick="window.location.reload()" style="padding: 0.6rem 1.2rem; background: #fe2c55; border: none; border-radius: 99px; color: #fff; font-weight: 700; cursor: pointer;">🔄 Thử lại</button>
+                    <a href="/gallery" style="padding: 0.6rem 1.2rem; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); border-radius: 99px; color: #fff; font-weight: 600; text-decoration: none;">Thư viện Gallery</a>
+                </div>
+            </div>
+        `;
     }
 
     // -------------------------------------------------------------

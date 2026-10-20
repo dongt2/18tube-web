@@ -807,7 +807,7 @@ def _get_all_available_videos():
     global _FEED_VIDEOS_CACHE, _FEED_VIDEOS_CACHE_TIME
     now = time.time()
     with _FEED_VIDEOS_LOCK:
-        if _FEED_VIDEOS_CACHE is not None and (now - _FEED_VIDEOS_CACHE_TIME < 600):
+        if _FEED_VIDEOS_CACHE and (now - _FEED_VIDEOS_CACHE_TIME < 300):
             return _FEED_VIDEOS_CACHE
 
         all_vids = []
@@ -816,7 +816,7 @@ def _get_all_available_videos():
             conn = _get_db()
             with _db_lock:
                 cur = conn.cursor()
-                cur.execute("SELECT key, value FROM cache WHERE key LIKE 'drive_creator_items_%'")
+                cur.execute("SELECT key, value FROM cache WHERE key LIKE 'drive_creator_items_%' AND key NOT LIKE 'drive_creator_items_all%'")
                 rows = cur.fetchall()
 
             for k, val_bytes in rows:
@@ -842,15 +842,20 @@ def _get_all_available_videos():
                             v["country"] = creator_country
                         if not v.get("slug"):
                             v["slug"] = creator_slug
+                        if not v.get("stream_url") and vid_id:
+                            v["stream_url"] = f"/api/media/drive/stream?id={vid_id}&name={v.get('name', 'video.mp4')}"
+                        if not v.get("thumbnail_url") and vid_id:
+                            v["thumbnail_url"] = f"https://lh3.googleusercontent.com/d/{vid_id}=w800"
                         all_vids.append(v)
                 except Exception:
                     continue
         except Exception as e:
             print(f"Lỗi gom video cho feed: {e}")
 
-        _FEED_VIDEOS_CACHE = all_vids
-        _FEED_VIDEOS_CACHE_TIME = now
-        return _FEED_VIDEOS_CACHE
+        if all_vids:
+            _FEED_VIDEOS_CACHE = all_vids
+            _FEED_VIDEOS_CACHE_TIME = now
+        return all_vids
 
 @app.route("/feed")
 @app.route("/tiktok")
@@ -865,6 +870,20 @@ def feed():
     
     if target_creator:
         filtered = [v for v in all_videos if target_creator.lower() in (v.get("creator", "") or "").lower() or target_creator.lower() in (v.get("slug", "") or "").lower()]
+        if not filtered:
+            try:
+                c_data = get_cached(f"drive_creator_items_{target_creator}")
+                if not c_data:
+                    c_resp = api_drive_creator_detail(target_creator)
+                    if hasattr(c_resp, 'get_json'):
+                        c_data = (c_resp.get_json() or {}).get("data")
+                if c_data and isinstance(c_data, dict):
+                    for cv in c_data.get("videos", []):
+                        if not cv.get("creator"):
+                            cv["creator"] = c_data.get("name") or target_creator
+                        filtered.append(cv)
+            except Exception:
+                pass
         display_videos = filtered if filtered else all_videos
     else:
         display_videos = list(all_videos)
@@ -904,6 +923,20 @@ def api_feed_videos():
     all_videos = _get_all_available_videos()
     if target_creator:
         pool = [v for v in all_videos if target_creator.lower() in (v.get("creator", "") or "").lower() or target_creator.lower() in (v.get("slug", "") or "").lower()]
+        if not pool:
+            try:
+                c_data = get_cached(f"drive_creator_items_{target_creator}")
+                if not c_data:
+                    c_resp = api_drive_creator_detail(target_creator)
+                    if hasattr(c_resp, 'get_json'):
+                        c_data = (c_resp.get_json() or {}).get("data")
+                if c_data and isinstance(c_data, dict):
+                    for cv in c_data.get("videos", []):
+                        if not cv.get("creator"):
+                            cv["creator"] = c_data.get("name") or target_creator
+                        pool.append(cv)
+            except Exception:
+                pass
         if not pool:
             pool = all_videos
     elif mode == "following":

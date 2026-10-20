@@ -163,7 +163,6 @@
         const streamUrl = video.stream_url || (video.id ? `/api/media/drive/stream?id=${video.id}&name=${encodeURIComponent(video.name || 'video.mp4')}` : '');
         slide.dataset.streamUrl = streamUrl;
         const posterUrl = video.thumbnail_url || (video.id ? `https://lh3.googleusercontent.com/d/${video.id}=w800` : '/static/placeholder.svg');
-        const driveUrl = video.drive_view_url || (video.id ? `https://drive.google.com/file/d/${video.id}/view` : '#');
         const country = video.country || 'Việt Nam';
         const sizeStr = video.size_str || '';
 
@@ -244,18 +243,6 @@
                         </div>
                         <span class="action-count-text">Chia sẻ</span>
                     </button>
-
-                    <!-- GOOGLE DRIVE DIRECT BUTTON -->
-                    <a href="${driveUrl}" target="_blank" rel="noopener noreferrer" class="action-btn-item action-btn-drive" title="Mở file gốc trên Google Drive">
-                        <div class="action-icon-circle">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                                <polyline points="15 3 21 3 21 9"></polyline>
-                                <line x1="10" y1="14" x2="21" y2="3"></line>
-                            </svg>
-                        </div>
-                        <span class="action-count-text">Drive</span>
-                    </a>
 
                     <!-- SPINNING MUSIC DISC -->
                     <div class="action-music-disc">

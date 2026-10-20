@@ -812,11 +812,6 @@
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
                                 <span>Chia sẻ</span>
                             </button>
-
-                            <a href="${driveFolderUrl}" target="_blank" rel="noopener noreferrer" class="btn-profile-tiktok btn-profile-drive" title="Mở thư mục trên Google Drive">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                                <span>Mở Drive</span>
-                            </a>
                         </div>
                     </div>
                 </div>

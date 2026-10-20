@@ -244,7 +244,6 @@ html, body {
     scroll-snap-type: y mandatory;
     scrollbar-width: none;
     -ms-overflow-style: none;
-    -webkit-overflow-scrolling: touch;
 }
 
 .tiktok-feed-container::-webkit-scrollbar {

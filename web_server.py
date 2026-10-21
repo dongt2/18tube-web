@@ -1610,6 +1610,8 @@ def get_drive_access_token(remote="gg", force_refresh=False):
     """
     Lấy access_token còn hiệu lực của Google Drive qua rclone.
     Tối ưu: RAM cache siêu tốc giúp giảm độ trễ từ ~500ms xuống <0.01ms cho mỗi request streaming.
+    Tự động phát hiện token hết hạn và gọi rclone làm mới tức thì.
+    Đồng bộ hóa đơn luồng (mutex lock) để tránh giật lag do hàng chục video request đồng thời.
     """
     global _drive_token_cache
     now = time.time()
@@ -1617,40 +1619,64 @@ def get_drive_access_token(remote="gg", force_refresh=False):
         if not force_refresh and _drive_token_cache["token"] and now < _drive_token_cache["expires_at"]:
             return _drive_token_cache["token"]
 
-    rc = downloader.get_rclone_path()
-    if not rc:
-        return None
-    try:
-        # Nếu force_refresh (ví dụ gặp lỗi 401 Unauthorized), gọi rclone about để rclone tự làm mới token
-        if force_refresh:
-            subprocess.run([rc, "about", f"{remote}:", "--json"], capture_output=True, text=True, timeout=8, **SUBPROCESS_EXTRA)
-
-        res = subprocess.run([rc, "config", "show", remote], capture_output=True, text=True, timeout=5, **SUBPROCESS_EXTRA)
-        token_m = re.search(r'token\s*=\s*(\{.*?\})', res.stdout)
-        if token_m:
-            token_data = json.loads(token_m.group(1))
+        rc = downloader.get_rclone_path()
+        if not rc:
+            return None
+        try:
+            # 1. Đọc cấu hình token hiện tại trong rclone
+            res = subprocess.run([rc, "config", "show", remote], capture_output=True, text=True, timeout=8, **SUBPROCESS_EXTRA)
+            token_m = re.search(r'token\s*=\s*(\{.*?\})', res.stdout)
+            token_data = json.loads(token_m.group(1)) if token_m else {}
             access_token = token_data.get("access_token")
-            # Google access token có thời hạn 3600s. Cache an toàn 40-50 phút
-            ttl = 2400
-            expires_in = token_data.get("expires_in")
-            if isinstance(expires_in, (int, float)) and expires_in > 120:
-                ttl = expires_in - 120
-            elif "expiry" in token_data:
+
+            # 2. Kiểm tra hạn sử dụng của token
+            is_expired = True
+            ttl = 0
+            if "expiry" in token_data:
                 try:
                     from datetime import datetime
                     exp_str = token_data["expiry"]
                     exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
-                    ttl = max(60, (exp_dt.timestamp() - now) - 120)
+                    rem = exp_dt.timestamp() - now
+                    if rem > 60:
+                        is_expired = False
+                        ttl = min(rem - 60, 3000)
                 except Exception:
                     pass
+            elif token_data.get("expires_in"):
+                exp_in = token_data.get("expires_in")
+                if isinstance(exp_in, (int, float)) and exp_in > 120:
+                    is_expired = False
+                    ttl = min(exp_in - 120, 3000)
 
-            with _drive_token_lock:
+            # 3. Nếu force_refresh hoặc token đã hết hạn, yêu cầu rclone làm mới token ngay
+            if force_refresh or is_expired or not access_token:
+                subprocess.run([rc, "about", f"{remote}:", "--json"], capture_output=True, text=True, timeout=15, **SUBPROCESS_EXTRA)
+                res = subprocess.run([rc, "config", "show", remote], capture_output=True, text=True, timeout=8, **SUBPROCESS_EXTRA)
+                token_m = re.search(r'token\s*=\s*(\{.*?\})', res.stdout)
+                if token_m:
+                    token_data = json.loads(token_m.group(1))
+                    access_token = token_data.get("access_token")
+                    ttl = 2400
+                    if "expiry" in token_data:
+                        try:
+                            from datetime import datetime
+                            exp_dt = datetime.fromisoformat(token_data["expiry"].replace("Z", "+00:00"))
+                            rem = exp_dt.timestamp() - now
+                            if rem > 60:
+                                ttl = min(rem - 60, 3000)
+                        except Exception:
+                            pass
+
+            if access_token and ttl > 0:
                 _drive_token_cache["token"] = access_token
-                _drive_token_cache["expires_at"] = now + min(ttl, 3000)
-            return access_token
-    except Exception as e:
-        print(f"Lỗi lấy access token Google Drive: {e}")
-    return None
+                _drive_token_cache["expires_at"] = now + ttl
+                return access_token
+            elif access_token:
+                return access_token
+        except Exception as e:
+            print(f"Lỗi lấy access token Google Drive: {e}")
+        return None
 
 @app.route("/api/media/drive/stream", methods=["GET", "HEAD"])
 def api_media_drive_stream():
@@ -1670,7 +1696,9 @@ def api_media_drive_stream():
 
     token = get_drive_access_token("gg")
     if not token:
-        abort(401)
+        token = get_drive_access_token("gg", force_refresh=True)
+        if not token:
+            abort(401)
 
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
     headers = {"Authorization": f"Bearer {token}"}

@@ -41,6 +41,7 @@ app = Flask(
     static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "static")
 )
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.url_map.strict_slashes = False
 
 @app.after_request
 def compress_and_cache_response(response):
